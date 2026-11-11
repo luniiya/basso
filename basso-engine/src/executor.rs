@@ -24,6 +24,10 @@ pub struct PlayerState {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub in_water: bool,
+    /// The eyes are under water.
+    pub eye_in_water: bool,
+    /// Air left, in ticks (vanilla's 300 when full).
+    pub air: i32,
 }
 
 impl PlayerState {

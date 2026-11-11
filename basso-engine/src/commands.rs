@@ -24,11 +24,24 @@ pub const COMMAND_HELP: &[(&str, &str, &str)] = &[
     ("resume", "", "Resume whatever was paused"),
     ("cancel", "", "Cancel the current order"),
     ("paused", "", "Tell whether basso is paused"),
+    (
+        "set",
+        "[setting] [true|false]",
+        "List the settings, show one, or change one",
+    ),
+    ("toggle", "<setting>", "Turn a setting on or off"),
     ("help", "[command]", "Show this help, or help for one command"),
+];
+
+/// The commands' names, in [`COMMAND_HELP`] order, for completion.
+pub const COMMAND_NAMES: &[&str] = &[
+    "goto", "mine", "follow", "pause", "resume", "cancel", "paused", "set", "toggle", "help",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    /// A bare `/basso`: point at the help instead of printing all of it.
+    Hint,
     Help(Option<String>),
     Goto(Goal),
     GotoBlock(String),
@@ -41,7 +54,15 @@ pub enum Command {
     Resume,
     Cancel,
     Paused,
+    Set {
+        name: Option<String>,
+        value: Option<String>,
+    },
+    Toggle(String),
 }
+
+/// What a bare `/basso` says.
+pub const HINT: &str = "Type `basso help` for the commands.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FollowTarget {
@@ -68,7 +89,7 @@ impl std::fmt::Display for FollowTarget {
 pub fn parse(line: &str, origin: BlockPos) -> Result<Command, String> {
     let args = parse_line(line);
     let Some((command, rest)) = args.split_first() else {
-        return Ok(Command::Help(None));
+        return Ok(Command::Hint);
     };
     match command.as_str() {
         "help" | "?" => Ok(Command::Help(rest.first().cloned())),
@@ -79,6 +100,17 @@ pub fn parse(line: &str, origin: BlockPos) -> Result<Command, String> {
         "resume" => Ok(Command::Resume),
         "cancel" | "stop" => Ok(Command::Cancel),
         "paused" => Ok(Command::Paused),
+        "set" => match rest {
+            [] | [_] | [_, _] => Ok(Command::Set {
+                name: rest.first().cloned(),
+                value: rest.get(1).cloned(),
+            }),
+            _ => Err("Usage: basso set [setting] [true|false]".to_owned()),
+        },
+        "toggle" => match rest {
+            [name] => Ok(Command::Toggle(name.clone())),
+            _ => Err("Usage: basso toggle <setting>".to_owned()),
+        },
         other => Err(format!("Unknown basso command `{other}`. Try `basso help`.")),
     }
 }
@@ -198,6 +230,12 @@ fn parse_i32(input: &str, origin: i32) -> Result<i32, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn command_names_follow_the_help() {
+        let help: Vec<&str> = COMMAND_HELP.iter().map(|(name, _, _)| *name).collect();
+        assert_eq!(help, COMMAND_NAMES);
+    }
+
     use super::*;
 
     const ORIGIN: BlockPos = BlockPos::new(10, 64, -5);
@@ -224,9 +262,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_line_is_help() {
-        assert_eq!(parse("basso", ORIGIN), Ok(Command::Help(None)));
-        assert_eq!(parse("", ORIGIN), Ok(Command::Help(None)));
+    fn empty_line_is_a_hint() {
+        assert_eq!(parse("basso", ORIGIN), Ok(Command::Hint));
+        assert_eq!(parse("/basso", ORIGIN), Ok(Command::Hint));
+        assert_eq!(parse("", ORIGIN), Ok(Command::Hint));
+        assert_eq!(parse("basso help", ORIGIN), Ok(Command::Help(None)));
+    }
+
+    #[test]
+    fn parses_settings_commands() {
+        assert_eq!(parse("basso set", ORIGIN), Ok(Command::Set { name: None, value: None }));
+        assert_eq!(
+            parse("basso set autoTool", ORIGIN),
+            Ok(Command::Set {
+                name: Some("autoTool".to_owned()),
+                value: None
+            })
+        );
+        assert_eq!(
+            parse("basso set autoTool false", ORIGIN),
+            Ok(Command::Set {
+                name: Some("autoTool".to_owned()),
+                value: Some("false".to_owned())
+            })
+        );
+        assert!(parse("basso set a b c", ORIGIN).is_err());
+        assert_eq!(parse("basso toggle freecam", ORIGIN), Ok(Command::Toggle("freecam".to_owned())));
+        assert!(parse("basso toggle", ORIGIN).is_err());
+        assert!(parse("basso toggle a b", ORIGIN).is_err());
     }
 
     #[test]
@@ -256,7 +319,7 @@ mod tests {
     #[test]
     fn help_lists_the_commands() {
         let text = help(None).join("\n");
-        for command in ["goto", "mine", "follow", "pause", "resume", "cancel", "help"] {
+        for command in ["goto", "mine", "follow", "pause", "resume", "cancel", "help", "set", "toggle"] {
             assert!(text.contains(command), "{command} missing from {text}");
         }
     }

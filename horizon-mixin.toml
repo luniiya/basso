@@ -28,17 +28,6 @@ helper = "mixins/basso/tick.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
 
 [[injection]]
-id = "visuals"
-hook = "visuals"
-hook_version = 1
-kind = "HEAD"
-helper = "mixins/basso/visuals.rs"
-bindings = [
-    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
-    { name = "rims", ty = "&mut Vec<horizon_client::mod_api::NativeBlockRim>", value = "&mut *rims" },
-]
-
-[[injection]]
 id = "commands"
 hook = "commands"
 hook_version = 1
@@ -56,4 +45,88 @@ bindings = [
     { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
     { name = "command", ty = "&str", value = "command" },
     { name = "ran", ty = "&mut bool", value = "&mut *ran" },
+]
+
+[[injection]]
+id = "world_primitives"
+# In the source but not yet in native-hooks.json, so named by its function.
+target = "horizon_client::game::native_hooks::Game<'_>::native_world_primitives"
+kind = "HEAD"
+helper = "mixins/basso/world_primitives.rs"
+bindings = [
+    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+    { name = "primitives", ty = "&mut horizon_client::world_primitives::WorldPrimitives", value = "&mut *primitives" },
+]
+
+[[injection]]
+id = "movement_input"
+hook = "movement_input"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/movement_input.rs"
+bindings = [
+    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+    { name = "forward", ty = "&mut f32", value = "&mut *forward" },
+    { name = "strafe", ty = "&mut f32", value = "&mut *strafe" },
+    { name = "jump", ty = "&mut bool", value = "&mut *jump" },
+    { name = "sneak", ty = "&mut bool", value = "&mut *sneak" },
+]
+
+[[injection]]
+id = "mouse_button"
+hook = "mouse_button_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/mouse_button.rs"
+bindings = [
+    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+    { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "mouse_scrolling"
+hook = "mouse_scrolling"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/mouse_scrolling.rs"
+bindings = [
+    { name = "accumulated", ty = "[i32; 2]", value = "accumulated" },
+    { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "camera_pose"
+hook = "camera_pose"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/camera_pose.rs"
+bindings = [
+    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+    { name = "partial", ty = "f32", value = "partial" },
+    { name = "position", ty = "&mut [f64; 3]", value = "&mut *position" },
+    { name = "yaw", ty = "&mut f32", value = "&mut *yaw" },
+    { name = "pitch", ty = "&mut f32", value = "&mut *pitch" },
+]
+
+# Not a hook point: the mouse's turn of the player (`Entity.turn`). basso
+# steers by setting the view itself, so skipping this only stops the mouse.
+[[injection]]
+id = "turn_player"
+target = "horizon_client::game::perspective::Game<'_>::turn_player"
+kind = "HEAD"
+cancellable = true
+helper = "mixins/basso/turn_player.rs"
+bindings = [
+    { name = "xo", ty = "f64", value = "xo" },
+    { name = "yo", ty = "f64", value = "yo" },
+]
+
+# Not a hook point: the chat box's command tree, built once per connection.
+[[injection]]
+id = "chat_tree"
+target = "horizon_client::game::chat::Game<'_>::chat_tree_for"
+kind = "RETURN"
+helper = "mixins/basso/chat_tree.rs"
+bindings = [
+    { name = "value", ty = "horizon_client::command::Dispatcher", value = "$value" },
 ]

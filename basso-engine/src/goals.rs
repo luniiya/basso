@@ -27,11 +27,17 @@ pub enum Goal {
     /// Baritone's `GoalGetToBlock`: next to the block or standing on it, to
     /// reach it without breaking it.
     GetToBlock(BlockPos),
+    /// Baritone's `GoalComposite`: any one of these, whichever is nearest.
+    Composite(Vec<Goal>),
 }
 
 impl Goal {
     pub fn heuristic(&self, n: BlockPos) -> f32 {
         match *self {
+            Goal::Composite(ref goals) => goals
+                .iter()
+                .map(|g| g.heuristic(n))
+                .fold(f32::INFINITY, f32::min),
             Goal::Block(p) => {
                 xz_heuristic((p.x - n.x) as f32, (p.z - n.z) as f32)
                     + y_heuristic((p.y - n.y) as f32)
@@ -58,6 +64,7 @@ impl Goal {
 
     pub fn success(&self, n: BlockPos) -> bool {
         match *self {
+            Goal::Composite(ref goals) => goals.iter().any(|g| g.success(n)),
             Goal::Block(p) => n == p,
             Goal::XZ { x, z } => n.x == x && n.z == z,
             Goal::Y(y) => n.y == y,
@@ -87,6 +94,7 @@ impl std::fmt::Display for Goal {
                 write!(f, "within {radius} of {:.1} {:.1} {:.1}", pos.x, pos.y, pos.z)
             }
             Goal::TwoBlocks(p) | Goal::GetToBlock(p) => write!(f, "the block at {p}"),
+            Goal::Composite(goals) => write!(f, "one of {} goals", goals.len()),
         }
     }
 }
@@ -114,6 +122,21 @@ fn y_heuristic(dy: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composite_goal_is_the_nearest_of_its_goals() {
+        let a = Goal::TwoBlocks(BlockPos::new(10, 64, 0));
+        let b = Goal::TwoBlocks(BlockPos::new(0, 64, 3));
+        let both = Goal::Composite(vec![a.clone(), b.clone()]);
+        let n = BlockPos::new(0, 64, 0);
+        assert_eq!(both.heuristic(n), a.heuristic(n).min(b.heuristic(n)));
+        assert_eq!(both.heuristic(n), b.heuristic(n));
+        assert!(both.success(BlockPos::new(10, 64, 0)));
+        assert!(both.success(BlockPos::new(0, 64, 3)));
+        assert!(!both.success(n));
+        assert!(!Goal::Composite(Vec::new()).success(n));
+        assert_eq!(both.to_string(), "one of 2 goals");
+    }
 
     #[test]
     fn block_goal() {

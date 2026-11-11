@@ -17,6 +17,9 @@ use crate::{
 /// For a better partial path when the search runs out, as Baritone does.
 const COEFFICIENTS: [f32; 7] = [1.5, 2., 2.5, 3., 4., 5., 15.];
 const MIN_IMPROVEMENT: f32 = 0.01;
+/// Baritone's `MIN_DIST_PATH`: a partial path must end farther than this
+/// from the start, or it is too short to be worth walking.
+const MIN_DIST_PATH: i32 = 5;
 
 /// One step of a path.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,8 +48,8 @@ pub struct Budget {
 impl Default for Budget {
     fn default() -> Self {
         Self {
-            min_nodes: 10_000,
-            max_nodes: 40_000,
+            min_nodes: 30_000,
+            max_nodes: 120_000,
         }
     }
 }
@@ -83,94 +86,196 @@ impl PartialOrd for Open {
     }
 }
 
-pub fn a_star(world: &CachedWorld, start: BlockPos, goal: &Goal, budget: Budget) -> Path {
-    let mut nodes = vec![Node {
-        pos: start,
-        came_from: u32::MAX,
-        kind: MoveKind::Forward,
-        g_score: 0.,
-    }];
-    let mut index_of: HashMap<BlockPos, u32> = HashMap::from([(start, 0)]);
-    let mut open = BinaryHeap::from([Open {
-        f_score: 0.,
-        g_score: 0.,
-        index: 0,
-    }]);
+/// A search that can run a slice at a time, so the game can draw it while it
+/// works (Baritone's best-path-so-far preview). The world is looked at again
+/// each slice.
+pub struct AStar {
+    start: BlockPos,
+    goal: Goal,
+    budget: Budget,
+    nodes: Vec<Node>,
+    index_of: HashMap<BlockPos, u32>,
+    open: BinaryHeap<Open>,
+    best_paths: [u32; 7],
+    best_path_scores: [f32; 7],
+    num_nodes: usize,
+    /// The node looked at last.
+    recent: u32,
+}
 
-    let mut best_paths = [0u32; 7];
-    let mut best_path_scores = [goal.heuristic(start); 7];
-    let mut num_nodes = 0usize;
-
-    while let Some(Open { index, g_score, .. }) = open.pop() {
-        let node_pos = nodes[index as usize].pos;
-        if g_score > nodes[index as usize].g_score {
-            continue;
-        }
-        num_nodes += 1;
-
-        if goal.success(node_pos) {
-            return Path {
-                steps: reconstruct(&nodes, index),
-                is_partial: false,
-                cost: g_score,
-            };
-        }
-
-        for edge in moves::successors(world, node_pos) {
-            let tentative = g_score + edge.cost;
-            let neighbor_index = match index_of.entry(edge.target) {
-                Entry::Occupied(e) => {
-                    let i = *e.get();
-                    let node = &mut nodes[i as usize];
-                    if node.g_score <= tentative {
-                        continue;
-                    }
-                    node.came_from = index;
-                    node.kind = edge.kind;
-                    node.g_score = tentative;
-                    i
-                }
-                Entry::Vacant(e) => {
-                    let i = nodes.len() as u32;
-                    e.insert(i);
-                    nodes.push(Node {
-                        pos: edge.target,
-                        came_from: index,
-                        kind: edge.kind,
-                        g_score: tentative,
-                    });
-                    i
-                }
-            };
-            let heuristic = goal.heuristic(edge.target);
-            open.push(Open {
-                f_score: tentative + heuristic,
-                g_score: tentative,
-                index: neighbor_index,
-            });
-
-            for (i, coefficient) in COEFFICIENTS.iter().enumerate() {
-                let score = heuristic + tentative / coefficient;
-                if best_path_scores[i] - score > MIN_IMPROVEMENT {
-                    best_paths[i] = neighbor_index;
-                    best_path_scores[i] = score;
-                }
-            }
-        }
-
-        if num_nodes >= budget.max_nodes || (num_nodes >= budget.min_nodes && best_paths[6] != 0)
-        {
-            break;
+impl AStar {
+    pub fn new(start: BlockPos, goal: Goal, budget: Budget) -> Self {
+        let start_score = goal.heuristic(start);
+        Self {
+            start,
+            goal,
+            budget,
+            nodes: vec![Node {
+                pos: start,
+                came_from: u32::MAX,
+                kind: MoveKind::Forward,
+                g_score: 0.,
+            }],
+            index_of: HashMap::from([(start, 0)]),
+            open: BinaryHeap::from([Open {
+                f_score: 0.,
+                g_score: 0.,
+                index: 0,
+            }]),
+            best_paths: [0; 7],
+            best_path_scores: [start_score; 7],
+            num_nodes: 0,
+            recent: 0,
         }
     }
 
-    // the first coefficient whose best node isn't the start, so the partial
-    // path isn't uselessly short
-    let best = best_paths.iter().position(|&n| n != 0).unwrap_or(0);
-    Path {
-        steps: reconstruct(&nodes, best_paths[best]),
-        is_partial: true,
-        cost: best_path_scores[best],
+    pub fn goal(&self) -> &Goal {
+        &self.goal
+    }
+
+    pub fn start(&self) -> BlockPos {
+        self.start
+    }
+
+    /// How many nodes it has looked at.
+    pub fn nodes_considered(&self) -> usize {
+        self.num_nodes
+    }
+
+    /// Look at up to `nodes` more nodes. `Some` once the search is over.
+    pub fn run(&mut self, world: &CachedWorld, nodes: usize) -> Option<Path> {
+        let stop_at = self.num_nodes.saturating_add(nodes);
+        while let Some(Open { index, g_score, .. }) = self.open.pop() {
+            let node_pos = self.nodes[index as usize].pos;
+            if g_score > self.nodes[index as usize].g_score {
+                continue;
+            }
+            self.num_nodes += 1;
+            self.recent = index;
+
+            if self.goal.success(node_pos) {
+                return Some(Path {
+                    steps: reconstruct(&self.nodes, index),
+                    is_partial: false,
+                    cost: g_score,
+                });
+            }
+
+            for edge in moves::successors(world, node_pos) {
+                let tentative = g_score + edge.cost;
+                let neighbor_index = match self.index_of.entry(edge.target) {
+                    Entry::Occupied(e) => {
+                        let i = *e.get();
+                        let node = &mut self.nodes[i as usize];
+                        if node.g_score <= tentative {
+                            continue;
+                        }
+                        node.came_from = index;
+                        node.kind = edge.kind;
+                        node.g_score = tentative;
+                        i
+                    }
+                    Entry::Vacant(e) => {
+                        let i = self.nodes.len() as u32;
+                        e.insert(i);
+                        self.nodes.push(Node {
+                            pos: edge.target,
+                            came_from: index,
+                            kind: edge.kind,
+                            g_score: tentative,
+                        });
+                        i
+                    }
+                };
+                let heuristic = self.goal.heuristic(edge.target);
+                self.open.push(Open {
+                    f_score: tentative + heuristic,
+                    g_score: tentative,
+                    index: neighbor_index,
+                });
+
+                for (i, coefficient) in COEFFICIENTS.iter().enumerate() {
+                    let score = heuristic + tentative / coefficient;
+                    if self.best_path_scores[i] - score > MIN_IMPROVEMENT {
+                        self.best_paths[i] = neighbor_index;
+                        self.best_path_scores[i] = score;
+                    }
+                }
+            }
+
+            if self.num_nodes >= self.budget.max_nodes
+                || (self.num_nodes >= self.budget.min_nodes && self.far_enough().is_some())
+            {
+                return Some(self.partial());
+            }
+            if self.num_nodes >= stop_at {
+                return None;
+            }
+        }
+        Some(self.partial())
+    }
+
+    /// Baritone's `bestSoFar`: the first coefficient whose best node is more
+    /// than [`MIN_DIST_PATH`] from the start.
+    fn far_enough(&self) -> Option<usize> {
+        let min = MIN_DIST_PATH * MIN_DIST_PATH;
+        self.best_paths.iter().position(|&n| {
+            let pos = self.nodes[n as usize].pos;
+            let (dx, dy, dz) = (pos.x - self.start.x, pos.y - self.start.y, pos.z - self.start.z);
+            dx * dx + dy * dy + dz * dz > min
+        })
+    }
+
+    /// The coefficient the partial path follows: one that goes far enough,
+    /// else (only when the search had to stop) the first that goes anywhere.
+    fn best(&self) -> usize {
+        self.far_enough()
+            .or_else(|| self.best_paths.iter().position(|&n| n != 0))
+            .unwrap_or(0)
+    }
+
+    fn partial(&self) -> Path {
+        let best = self.best();
+        Path {
+            steps: reconstruct(&self.nodes, self.best_paths[best]),
+            is_partial: true,
+            cost: self.best_path_scores[best],
+        }
+    }
+
+    fn positions(&self, index: u32) -> Vec<BlockPos> {
+        std::iter::once(self.start)
+            .chain(reconstruct(&self.nodes, index).into_iter().map(|s| s.target))
+            .collect()
+    }
+
+    /// Baritone's `bestPathSoFar`, from the start, for drawing.
+    pub fn best_so_far(&self) -> Vec<BlockPos> {
+        self.positions(self.best_paths[self.best()])
+    }
+
+    /// Baritone's `pathToMostRecentNodeConsidered`, for drawing.
+    pub fn most_recent(&self) -> Vec<BlockPos> {
+        self.positions(self.recent)
+    }
+}
+
+impl std::fmt::Debug for AStar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AStar")
+            .field("start", &self.start)
+            .field("goal", &self.goal)
+            .field("nodes_considered", &self.num_nodes)
+            .finish_non_exhaustive()
+    }
+}
+
+pub fn a_star(world: &CachedWorld, start: BlockPos, goal: &Goal, budget: Budget) -> Path {
+    let mut search = AStar::new(start, goal.clone(), budget);
+    loop {
+        if let Some(path) = search.run(world, usize::MAX) {
+            return path;
+        }
     }
 }
 
@@ -305,6 +410,26 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_path_goes_farther_than_min_dist() {
+        let world = TestWorld::flat(60);
+        let cached = CachedWorld::new(&world, false);
+        let start = BlockPos::new(0, 64, 0);
+        let path = a_star(
+            &cached,
+            start,
+            &Goal::Block(BlockPos::new(55, 64, 40)),
+            Budget {
+                min_nodes: 50,
+                max_nodes: 2_000,
+            },
+        );
+        assert!(path.is_partial);
+        let end = path.steps.last().unwrap().target;
+        let (dx, dz) = (end.x - start.x, end.z - start.z);
+        assert!(dx * dx + dz * dz > MIN_DIST_PATH * MIN_DIST_PATH, "{end:?}");
+    }
+
+    #[test]
     fn budget_caps_the_search() {
         let world = TestWorld::flat(60);
         let cached = CachedWorld::new(&world, false);
@@ -318,5 +443,43 @@ mod tests {
             },
         );
         assert!(path.is_partial);
+    }
+
+    #[test]
+    fn sliced_search_finds_the_same_path() {
+        let world = TestWorld::flat(20);
+        let start = BlockPos::new(0, 64, 0);
+        let goal = Goal::Block(BlockPos::new(12, 64, 7));
+        let whole = search(&world, start, goal.clone(), false);
+        let cached = CachedWorld::new(&world, false);
+        let mut sliced = AStar::new(start, goal, Budget::default());
+        let mut slices = 0;
+        let path = loop {
+            slices += 1;
+            if let Some(path) = sliced.run(&cached, 3) {
+                break path;
+            }
+        };
+        assert!(slices > 1);
+        assert_eq!(path, whole);
+    }
+
+    #[test]
+    fn previews_start_at_the_start_while_searching() {
+        let world = TestWorld::flat(30);
+        let start = BlockPos::new(0, 64, 0);
+        let cached = CachedWorld::new(&world, false);
+        let mut search = AStar::new(start, Goal::Block(BlockPos::new(25, 64, 0)), Budget::default());
+        assert_eq!(search.best_so_far(), [start]);
+        assert_eq!(search.run(&cached, 10), None);
+        assert_eq!(search.nodes_considered(), 10);
+        let best = search.best_so_far();
+        assert_eq!(best[0], start);
+        assert!(best.len() > 1);
+        // heading for the goal
+        assert!(best.last().unwrap().x > 0);
+        assert_eq!(search.most_recent()[0], start);
+        assert_eq!(search.start(), start);
+        assert_eq!(search.goal(), &Goal::Block(BlockPos::new(25, 64, 0)));
     }
 }
