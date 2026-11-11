@@ -23,7 +23,7 @@ use bevy_ecs::prelude::*;
 
 use super::{CommandOutput, MAX_BLOCK_DISTANCE};
 use crate::pathfinder::{
-    ComputePath, ExecutingPath, GotoEvent, Pathfinder, PathfinderOpts,
+    ExecutingPath, GotoEvent, Pathfinder, PathfinderOpts, StopPathfindingEvent,
     goals::{Goal, RadiusGoal, ReachBlockPosGoal},
 };
 
@@ -133,7 +133,7 @@ pub struct OrderState {
 /// How often the block/follow processes reconsider their targets, in ticks.
 const SEARCH_INTERVAL_TICKS: u32 = 5;
 /// Only following targets that moved more than this get a new goal.
-const FOLLOW_RECALC_DISTANCE_SQUARED: f32 = 4.0;
+const FOLLOW_RECALC_DISTANCE_SQUARED: f64 = 4.0;
 
 pub struct CommandPlugin;
 
@@ -227,6 +227,14 @@ pub fn handle_target_block_process(
                 TargetBlockGoal::Goto => {
                     if reachable {
                         commands.entity(entity).remove::<TargetBlockProcess>();
+                    } else if executing_path.is_none()
+                        && pathfinder.is_none_or(|pathfinder| pathfinder.goal.is_none())
+                    {
+                        goto_events.write(GotoEvent {
+                            entity,
+                            goal: Arc::new(reach_goal),
+                            opts: PathfinderOpts::new(),
+                        });
                     }
                 }
                 TargetBlockGoal::Mine => {
@@ -276,6 +284,7 @@ pub fn handle_follow_process(
             &WorldName,
             &Position,
             &mut FollowProcess,
+            &OrderState,
             Option<&TabList>,
             Option<&Pathfinder>,
             Option<&ExecutingPath>,
@@ -298,9 +307,12 @@ pub fn handle_follow_process(
 ) {
     *tick += 1;
 
-    for (entity, world_name, position, mut process, tab_list, pathfinder, executing_path) in
+    for (entity, world_name, position, mut process, order, tab_list, pathfinder, executing_path) in
         &mut clients
     {
+        if order.paused {
+            continue;
+        }
         let wanted_uuids = match &process.target {
             FollowTarget::PlayerNames(names) => {
                 let Some(tab_list) = tab_list else {
@@ -319,7 +331,7 @@ pub fn handle_follow_process(
             _ => None,
         };
 
-        let mut nearest: Option<(Vec3, f32)> = None;
+        let mut nearest: Option<(Vec3, f64)> = None;
         for (_other, other_position, other_world, uuid, kind, is_player) in &entities {
             if other_world != world_name {
                 continue;
@@ -377,7 +389,7 @@ pub(crate) fn pause(ecs: &mut World, entity: Entity) -> CommandOutput {
     {
         return CommandOutput::line("basso is already paused.");
     }
-    if !ecs.contains::<OrderState>(entity) {
+    if ecs.get::<OrderState>(entity).is_none() {
         ecs.entity_mut(entity).insert(OrderState::default());
     }
 
@@ -392,8 +404,14 @@ pub(crate) fn pause(ecs: &mut World, entity: Entity) -> CommandOutput {
         pathfinder.opts = None;
         pathfinder.is_calculating = false;
     }
-    ecs.entity_mut(entity)
-        .remove::<(ExecutingPath, ComputePath, MiningQueued)>();
+    ecs.entity_mut(entity).remove::<MiningQueued>();
+    if ecs.get::<Mining>(entity).is_some() {
+        ecs.write_message(StopMiningBlockEvent { entity });
+    }
+    ecs.write_message(StopPathfindingEvent {
+        entity,
+        force: true,
+    });
 
     let mut order = ecs
         .get_mut::<OrderState>(entity)
@@ -428,10 +446,10 @@ pub(crate) fn resume(ecs: &mut World, entity: Entity) -> CommandOutput {
 
 /// Cancel the current order and stop pathing and mining.
 pub(crate) fn cancel(ecs: &mut World, entity: Entity) -> CommandOutput {
-    let had_order = ecs.contains::<TargetBlockProcess>()
-        || ecs.contains::<FollowProcess>()
-        || ecs.contains::<ExecutingPath>()
-        || ecs.contains::<Mining>()
+    let had_order = ecs.get::<TargetBlockProcess>(entity).is_some()
+        || ecs.get::<FollowProcess>(entity).is_some()
+        || ecs.get::<ExecutingPath>(entity).is_some()
+        || ecs.get::<Mining>(entity).is_some()
         || ecs
             .get::<Pathfinder>(entity)
             .is_some_and(|pathfinder| pathfinder.goal.is_some() || pathfinder.is_calculating);
@@ -465,7 +483,7 @@ pub(crate) fn clear_current_order(ecs: &mut World, entity: Entity) {
     ecs.entity_mut(entity)
         .remove::<(TargetBlockProcess, FollowProcess, MiningQueued)>();
 
-    if ecs.contains::<Mining>(entity) {
+    if ecs.get::<Mining>(entity).is_some() {
         ecs.write_message(StopMiningBlockEvent { entity });
     }
 
@@ -474,8 +492,10 @@ pub(crate) fn clear_current_order(ecs: &mut World, entity: Entity) {
         pathfinder.opts = None;
         pathfinder.is_calculating = false;
     }
-    ecs.entity_mut(entity)
-        .remove::<(ExecutingPath, ComputePath)>();
+    ecs.write_message(StopPathfindingEvent {
+        entity,
+        force: true,
+    });
 }
 
 #[cfg(test)]

@@ -205,6 +205,7 @@ impl PluginGroup for DefaultBotPlugins {
         PluginGroupBuilder::start::<Self>()
             .add(BotPlugin)
             .add(crate::pathfinder::PathfinderPlugin)
+            .add(crate::commands::CommandPlugin)
             .add(crate::tick_broadcast::TickBroadcastPlugin)
     }
 }

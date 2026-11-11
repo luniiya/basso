@@ -65,6 +65,7 @@ fn create_simulation_world(chunks: ChunkStorage) -> (App, Arc<RwLock<World>>) {
         basso_entity::EntityPlugin,
         basso_client::movement::MovementPlugin,
         super::PathfinderPlugin,
+        crate::commands::CommandPlugin,
         crate::bot::BotPlugin,
         basso_client::task_pool::TaskPoolPlugin::default(),
         // for mining

@@ -4,6 +4,7 @@
 pub mod _docs;
 pub mod auto_tool;
 pub mod bot;
+pub mod commands;
 mod client_impl;
 pub mod entity_ref;
 pub mod nearest_entity;

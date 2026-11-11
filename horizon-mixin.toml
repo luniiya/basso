@@ -1,0 +1,28 @@
+# Basso's native Horizon bundle. Build with:
+# horizon-launcher native-build <this folder> --trust-native-code
+[mod]
+id = "basso"
+version = "0.1.0"
+
+[compatibility]
+horizon_revision = "1bec6d447afffd35d18401d80bbee78982235975"
+
+[[injection]]
+id = "commands"
+hook = "commands"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/commands.rs"
+bindings = [{ name = "commands", ty = "&mut Vec<&'static str>", value = "&mut *commands" }]
+
+[[injection]]
+id = "command"
+hook = "command"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/command.rs"
+bindings = [
+    { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+    { name = "command", ty = "&str", value = "command" },
+    { name = "ran", ty = "&mut bool", value = "&mut *ran" },
+]

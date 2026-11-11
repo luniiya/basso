@@ -21,7 +21,9 @@ picked from it.
 
 ## Status
 
-Just forked: the code is still Azalea as of `0.16.0+mc26.2` (Minecraft 26.2). Nothing is wired to Horizon yet.
+The repository contains a native Horizon bundle at `horizon-mixin.toml`. Build it with Horizon's launcher to prove the
+in-game bridge: `/basso` and `/basso help` are registered in chat and reply locally. The pathfinder remains an Azalea
+hard fork as of `0.16.0+mc26.2`; adapting its world, physics and tick inputs to Horizon is the next step.
 
 ## Tests
 

@@ -8,7 +8,7 @@
 //! The Horizon integration calls [`execute`] with the rest of the line after
 //! `/basso`.
 
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use basso_block::BlockStates;
 use basso_core::position::BlockPos;
