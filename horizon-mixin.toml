@@ -5,7 +5,38 @@ id = "basso"
 version = "0.1.0"
 
 [compatibility]
-horizon_revision = "1bec6d447afffd35d18401d80bbee78982235975"
+horizon_revision = "fdc87aecdbd116bf1e08adcd062fcbaea8c2e2ca"
+
+# The pathfinder: search, moves, orders and rendering, with no Horizon types.
+[[crate]]
+id = "engine"
+path = "basso-engine"
+
+# All Horizon-facing glue; the hook helpers are one-line wrappers around it.
+[[module]]
+id = "adapter"
+file = "crates/horizon-client/src/game.rs"
+name = "basso_adapter"
+source = "mixins/basso/adapter.rs"
+
+[[injection]]
+id = "tick"
+hook = "tick"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/tick.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+[[injection]]
+id = "visuals"
+hook = "visuals"
+hook_version = 1
+kind = "HEAD"
+helper = "mixins/basso/visuals.rs"
+bindings = [
+    { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+    { name = "rims", ty = "&mut Vec<horizon_client::mod_api::NativeBlockRim>", value = "&mut *rims" },
+]
 
 [[injection]]
 id = "commands"

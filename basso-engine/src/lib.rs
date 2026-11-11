@@ -3,6 +3,7 @@
 //! dependencies so it can ship inside a Horizon native mod bundle.
 
 pub mod astar;
+pub mod blocks;
 pub mod bot;
 pub mod commands;
 pub mod costs;
@@ -10,6 +11,7 @@ pub mod executor;
 pub mod goals;
 pub mod moves;
 pub mod pos;
+pub mod render;
 pub mod world;
 
 /// Whether the block id `wanted` (`diamond_ore` or `minecraft:diamond_ore`)
