@@ -2,9 +2,9 @@ from lib.utils import to_camel_case, to_snake_case, get_dir_location, upper_firs
 from typing import Optional
 import re
 
-METADATA_RS_DIR = get_dir_location("../azalea-entity/src/metadata.rs")
-DATA_RS_DIR = get_dir_location("../azalea-entity/src/data.rs")
-DIMENSIONS_RS_DIR = get_dir_location("../azalea-entity/src/dimensions.rs")
+METADATA_RS_DIR = get_dir_location("../basso-entity/src/metadata.rs")
+DATA_RS_DIR = get_dir_location("../basso-entity/src/data.rs")
+DIMENSIONS_RS_DIR = get_dir_location("../basso-entity/src/dimensions.rs")
 
 
 def generate_metadata_names(burger_dataserializers: dict):
@@ -94,7 +94,7 @@ def generate_entity_metadata(burger_entities_data: dict):
             f.write("\n".join(lines))
         print("Expected metadata types:\n" + "\n".join(new_metadata_names))
         print(
-            "Updated metadata types in azalea-entity/src/data.rs, go make sure they're correct (check EntityDataSerializers.java) and then press enter"
+            "Updated metadata types in basso-entity/src/data.rs, go make sure they're correct (check EntityDataSerializers.java) and then press enter"
         )
         input()
 
@@ -119,13 +119,13 @@ def generate_entity_metadata(burger_entities_data: dict):
 //!""")
 
     code = []
-    code.append("""use azalea_chat::FormattedText;
-use azalea_core::{
+    code.append("""use basso_chat::FormattedText;
+use basso_core::{
     direction::Direction,
     position::{BlockPos, Vec3f32},
 };
-use azalea_inventory::{ItemStack, components};
-use azalea_registry::{DataRegistry, builtin::EntityKind};
+use basso_inventory::{ItemStack, components};
+use basso_registry::{DataRegistry, builtin::EntityKind};
 use bevy_ecs::{bundle::Bundle, component::Component};
 use derive_more::{Deref, DerefMut};
 use thiserror::Error;
@@ -537,15 +537,15 @@ impl From<EntityDataValue> for UpdateMetadataError {
                             default = "simdnbt::owned::NbtCompound::default()"
                         # elif type_name == 'CatVariant':
                         #     # TODO: the default should be Tabby but we don't have a way to get that from here
-                        #     default = 'azalea_registry::data::CatVariant::new_raw(0)'
+                        #     default = 'basso_registry::data::CatVariant::new_raw(0)'
                         # elif type_name == 'PaintingVariant':
-                        #     default = 'azalea_registry::data::PaintingVariant::Kebab'
+                        #     default = 'basso_registry::data::PaintingVariant::Kebab'
                         # elif type_name == 'FrogVariant':
-                        #     default = 'azalea_registry::data::FrogVariant::Temperate'
+                        #     default = 'basso_registry::data::FrogVariant::Temperate'
                         elif type_name.endswith("Variant"):
-                            default = f"azalea_registry::data::{type_name}::new_raw(0)"
+                            default = f"basso_registry::data::{type_name}::new_raw(0)"
                         elif type_name == "VillagerData":
-                            default = "VillagerData { kind: azalea_registry::builtin::VillagerKind::Plains, profession: azalea_registry::builtin::VillagerProfession::None, level: 0 }"
+                            default = "VillagerData { kind: basso_registry::builtin::VillagerKind::Plains, profession: basso_registry::builtin::VillagerProfession::None, level: 0 }"
                         else:
                             default = (
                                 f"{type_name}::default()"
@@ -588,13 +588,13 @@ impl From<EntityDataValue> for UpdateMetadataError {
                             default = (
                                 f"{default}"
                                 if default != "Empty"
-                                else "azalea_block::BlockState::AIR"
+                                else "basso_block::BlockState::AIR"
                             )
                         elif type_name == "OptionalBlockState":
                             default = (
                                 f"{default}"
                                 if default != "Empty"
-                                else "azalea_block::BlockState::AIR"
+                                else "basso_block::BlockState::AIR"
                             )
                         elif type_name == "OptionalFormattedText":
                             default = (

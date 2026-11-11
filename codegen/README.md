@@ -21,11 +21,11 @@ First, run `python migrate.py [new version]`. This will run a script that automa
 -   Adding, removing, and updating packets in azalea-protocol (limited)
 -   Updating supported version in README.md
 -   Updating the `PROTOCOL_VERSION` variable in azalea-protocol
--   Generating blocks in azalea-block
--   Generating block shapes in azalea-physics
+-   Generating blocks in basso-block
+-   Generating block shapes in basso-physics
 -   Generating registries in azalea-registries
--   Updating en_us.json in azalea-language
--   Generating entity metadata structs and parsers in azalea-world
+-   Updating en_us.json in basso-language
+-   Generating entity metadata structs and parsers in basso-world
 
 If you're lucky, that's all you're going to have to do.
 Look at the diff (`git diff`) and type-check the code (`cargo check`) to make sure everything is right. In the diff, specifically look for new comments that have "TODO".

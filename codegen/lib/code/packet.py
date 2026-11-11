@@ -29,7 +29,7 @@ def generate_packet(packets_report, packet_name, direction, state):
     packet_struct_name = to_camel_case(f"{direction}_{packet_name}")
     packet_module_name = get_packet_module_name(packet_name, direction)
 
-    code.append("use azalea_buf::AzBuf;")
+    code.append("use basso_buf::AzBuf;")
     code.append(f"use azalea_protocol_macros::{packet_derive_name};")
     code.append("")
 

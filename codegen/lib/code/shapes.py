@@ -1,6 +1,6 @@
 from lib.utils import get_dir_location
 
-COLLISION_BLOCKS_RS_DIR = get_dir_location("../azalea-physics/src/collision/blocks.rs")
+COLLISION_BLOCKS_RS_DIR = get_dir_location("../basso-physics/src/collision/blocks.rs")
 
 
 def generate_block_shapes(pumpkin_blocks_data: dict, block_states_report, burger_data):
@@ -179,8 +179,8 @@ def generate_block_shapes_code(blocks: dict, shapes: dict, block_states_report):
 
 use std::{{borrow::Cow, sync::LazyLock}};
 
-use azalea_block::*;
-use azalea_core::position::BlockPos;
+use basso_block::*;
+use basso_core::position::BlockPos;
 
 use super::VoxelShape;
 use crate::collision::{{self, Shapes}};

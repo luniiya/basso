@@ -1,6 +1,6 @@
 from lib.utils import get_dir_location, to_camel_case
 
-BLOCKS_RS_DIR = get_dir_location("../azalea-block/src/generated.rs")
+BLOCKS_RS_DIR = get_dir_location("../basso-block/src/generated.rs")
 
 # Terminology:
 # - Property: A property of a block, like "direction"

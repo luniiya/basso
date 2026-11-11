@@ -1,0 +1,25 @@
+[package]
+name = "basso-inventory"
+description = "Representations of various inventory data structures in Minecraft."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+basso-buf.workspace = true
+basso-chat = { workspace = true, features = ["basso-buf"] }
+basso-core = { workspace = true, features = ["serde"] }
+basso-inventory-macros.workspace = true
+basso-registry = { workspace = true, features = ["serde"] }
+indexmap.workspace = true
+serde = { workspace = true, features = ["derive"] }
+simdnbt.workspace = true
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

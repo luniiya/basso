@@ -53,24 +53,24 @@ def burger_type_to_rust_type(
 
     elif burger_type == "chatcomponent":
         field_type_rs = "FormattedText"
-        uses.add("azalea_chat::FormattedText")
+        uses.add("basso_chat::FormattedText")
     elif burger_type == "identifier":
         field_type_rs = "Identifier"
-        uses.add("azalea_core::identifier::Identifier")
+        uses.add("basso_core::identifier::Identifier")
     elif burger_type == "uuid":
         field_type_rs = "Uuid"
         uses.add("uuid::Uuid")
     elif burger_type == "position":
         field_type_rs = "BlockPos"
-        uses.add("azalea_core::position::BlockPos")
+        uses.add("basso_core::position::BlockPos")
     elif burger_type == "nbtcompound":
         field_type_rs = "simdnbt::owned::NbtCompound"
     elif burger_type == "itemstack":
         field_type_rs = "Slot"
-        uses.add("azalea_core::slot::Slot")
+        uses.add("basso_core::slot::Slot")
     elif burger_type == "metadata":
         field_type_rs = "EntityMetadata"
-        uses.add("azalea_entity::EntityMetadata")
+        uses.add("basso_entity::EntityMetadata")
     elif burger_type == "bitset":
         if instruction:
             length = instruction["length"]
@@ -134,7 +134,7 @@ def burger_type_to_rust_type(
                 array_type = field
                 if array_type == "net.minecraft.network.FriendlyByteBuf":
                     field_type_rs = "UnsizedByteArray"
-                    uses.add("azalea_buf::UnsizedByteArray")
+                    uses.add("basso_buf::UnsizedByteArray")
 
     else:
         print("instruction that we errored on:", instruction)

@@ -1,0 +1,25 @@
+[package]
+name = "basso-physics"
+description = "Physics for Minecraft entities."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[dependencies]
+basso-block.workspace = true
+basso-core.workspace = true
+basso-entity = { workspace = true, features = ["bevy_ecs"] }
+basso-inventory.workspace = true
+basso-registry.workspace = true
+basso-world.workspace = true
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+
+[lints]
+workspace = true

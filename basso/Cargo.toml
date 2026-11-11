@@ -1,0 +1,71 @@
+[package]
+name = "basso"
+description = "A framework for creating Minecraft bots."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+pre-release-replacements = [
+    { file = "README.md", search = "`basso = \"[a-z0-9\\.-]+\"`", replace = "`basso = \"{{version}}\"`" },
+]
+
+[dependencies]
+basso-block.workspace = true
+basso-buf.workspace = true
+basso-chat.workspace = true
+basso-client.workspace = true
+basso-core.workspace = true
+basso-entity.workspace = true
+basso-inventory.workspace = true
+basso-physics.workspace = true
+basso-registry.workspace = true
+basso-world.workspace = true
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_tasks = { workspace = true, features = ["multi_threaded"] }
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
+futures.workspace = true
+futures-lite.workspace = true
+indexmap.workspace = true
+nohash-hasher.workspace = true
+num-format.workspace = true
+num-traits.workspace = true
+parking_lot.workspace = true
+radix-heap.workspace = true
+rustc-hash.workspace = true
+serde = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+
+[dev-dependencies]
+criterion.workspace = true
+eyre.workspace = true
+parking_lot = { workspace = true, features = ["deadlock_detection"] }
+rand.workspace = true
+bevy_log.workspace = true
+
+[features]
+default = ["log", "serde"]
+# enables bevy_log::LogPlugin by default
+log = ["basso-client/log"]
+serde = ["dep:serde", "basso-registry/serde", "basso-world/serde"]
+
+[[bench]]
+name = "pathfinder"
+harness = false
+
+[[bench]]
+name = "physics"
+harness = false
+
+[[bench]]
+name = "checks"
+harness = false
+
+[lints]
+workspace = true

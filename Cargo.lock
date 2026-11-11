@@ -83,19 +83,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-compat"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c97d7ff3c25d6c10d64170c12acaf5d4245e76dece3779c1d92b153a64f11df"
-dependencies = [
- "futures-core",
- "futures-io",
- "once_cell",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
 name = "async-executor"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -134,19 +121,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "azalea"
+name = "backtrace"
+version = "0.3.76"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6"
+dependencies = [
+ "addr2line",
+ "cfg-if",
+ "libc",
+ "miniz_oxide 0.8.9",
+ "object",
+ "rustc-demangle",
+ "windows-link",
+]
+
+[[package]]
+name = "basso"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-block",
- "azalea-buf",
- "azalea-chat",
- "azalea-client",
- "azalea-core",
- "azalea-entity",
- "azalea-inventory",
- "azalea-physics",
- "azalea-registry",
- "azalea-world",
+ "basso-block",
+ "basso-buf",
+ "basso-chat",
+ "basso-client",
+ "basso-core",
+ "basso-entity",
+ "basso-inventory",
+ "basso-physics",
+ "basso-registry",
+ "basso-world",
  "bevy_app",
  "bevy_ecs",
  "bevy_log",
@@ -172,18 +174,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-block"
+name = "basso-block"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-block-macros",
- "azalea-buf",
- "azalea-registry",
+ "basso-block-macros",
+ "basso-buf",
+ "basso-registry",
  "criterion",
  "rand",
 ]
 
 [[package]]
-name = "azalea-block-macros"
+name = "basso-block-macros"
 version = "0.16.0+mc26.2"
 dependencies = [
  "proc-macro2",
@@ -192,10 +194,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-buf"
+name = "basso-buf"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-buf-macros",
+ "basso-buf-macros",
  "byteorder",
  "indexmap",
  "serde_json",
@@ -206,7 +208,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-buf-macros"
+name = "basso-buf-macros"
 version = "0.16.0+mc26.2"
 dependencies = [
  "proc-macro2",
@@ -215,12 +217,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-chat"
+name = "basso-chat"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-buf",
- "azalea-language",
- "azalea-registry",
+ "basso-buf",
+ "basso-language",
+ "basso-registry",
  "serde",
  "serde_json",
  "simdnbt",
@@ -228,33 +230,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-client"
+name = "basso-client"
 version = "0.16.0+mc26.2"
 dependencies = [
- "async-compat",
- "azalea-block",
- "azalea-buf",
- "azalea-chat",
- "azalea-core",
- "azalea-entity",
- "azalea-inventory",
- "azalea-physics",
- "azalea-registry",
- "azalea-world",
+ "basso-block",
+ "basso-buf",
+ "basso-chat",
+ "basso-core",
+ "basso-entity",
+ "basso-inventory",
+ "basso-physics",
+ "basso-registry",
+ "basso-world",
  "bevy_app",
  "bevy_ecs",
  "bevy_log",
  "bevy_tasks",
  "bevy_time",
  "bevy_utils",
- "chrono",
  "derive_more",
- "eyre",
  "indexmap",
- "minecraft_folder_path",
  "parking_lot",
- "regex",
- "simdnbt",
  "thiserror",
  "tokio",
  "tracing",
@@ -262,12 +258,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-core"
+name = "basso-core"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-buf",
- "azalea-chat",
- "azalea-registry",
+ "basso-buf",
+ "basso-chat",
+ "basso-registry",
  "bevy_ecs",
  "crc32c",
  "derive_more",
@@ -282,16 +278,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-entity"
+name = "basso-entity"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-block",
- "azalea-buf",
- "azalea-chat",
- "azalea-core",
- "azalea-inventory",
- "azalea-registry",
- "azalea-world",
+ "basso-block",
+ "basso-buf",
+ "basso-chat",
+ "basso-core",
+ "basso-inventory",
+ "basso-registry",
+ "basso-world",
  "bevy_app",
  "bevy_ecs",
  "derive_more",
@@ -304,14 +300,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-inventory"
+name = "basso-inventory"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-buf",
- "azalea-chat",
- "azalea-core",
- "azalea-inventory-macros",
- "azalea-registry",
+ "basso-buf",
+ "basso-chat",
+ "basso-core",
+ "basso-inventory-macros",
+ "basso-registry",
  "indexmap",
  "serde",
  "serde_json",
@@ -321,7 +317,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-inventory-macros"
+name = "basso-inventory-macros"
 version = "0.16.0+mc26.2"
 dependencies = [
  "proc-macro2",
@@ -330,7 +326,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-language"
+name = "basso-language"
 version = "0.16.0+mc26.2"
 dependencies = [
  "compact_str",
@@ -338,15 +334,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-physics"
+name = "basso-physics"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-block",
- "azalea-core",
- "azalea-entity",
- "azalea-inventory",
- "azalea-registry",
- "azalea-world",
+ "basso-block",
+ "basso-core",
+ "basso-entity",
+ "basso-inventory",
+ "basso-registry",
+ "basso-world",
  "bevy_app",
  "bevy_ecs",
  "parking_lot",
@@ -355,17 +351,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-registry"
+name = "basso-registry"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-buf",
- "azalea-registry-macros",
+ "basso-buf",
+ "basso-registry-macros",
  "serde",
  "simdnbt",
 ]
 
 [[package]]
-name = "azalea-registry-macros"
+name = "basso-registry-macros"
 version = "0.16.0+mc26.2"
 dependencies = [
  "quote",
@@ -373,13 +369,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "azalea-world"
+name = "basso-world"
 version = "0.16.0+mc26.2"
 dependencies = [
- "azalea-block",
- "azalea-buf",
- "azalea-core",
- "azalea-registry",
+ "basso-block",
+ "basso-buf",
+ "basso-core",
+ "basso-registry",
  "bevy_ecs",
  "criterion",
  "derive_more",
@@ -389,21 +385,6 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde",
  "tracing",
-]
-
-[[package]]
-name = "backtrace"
-version = "0.3.76"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6"
-dependencies = [
- "addr2line",
- "cfg-if",
- "libc",
- "miniz_oxide 0.8.9",
- "object",
- "rustc-demangle",
- "windows-link",
 ]
 
 [[package]]
@@ -734,15 +715,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "rand_core",
-]
-
-[[package]]
-name = "chrono"
-version = "0.4.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]
@@ -1392,12 +1364,6 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
-
-[[package]]
-name = "minecraft_folder_path"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d60a6352e005f1f86008644a9fe336a66f74c94428182162cc69eb8c6fff458d"
 
 [[package]]
 name = "miniz_oxide"

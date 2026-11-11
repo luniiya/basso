@@ -1,0 +1,20 @@
+[package]
+name = "basso-registry"
+description = "Use Minecraft's registries."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+basso-buf.workspace = true
+basso-registry-macros.workspace = true
+serde = { workspace = true, optional = true, features = ["derive"] }
+simdnbt.workspace = true
+
+[features]
+serde = ["basso-registry-macros/serde", "dep:serde"]
+default = ["serde"]
+
+[lints]
+workspace = true

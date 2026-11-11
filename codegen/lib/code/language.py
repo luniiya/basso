@@ -1,7 +1,7 @@
 from lib.utils import get_dir_location
 import json
 
-LANGUAGE_DIR = get_dir_location("../azalea-language/src/en_us.json")
+LANGUAGE_DIR = get_dir_location("../basso-language/src/en_us.json")
 
 
 def write_language(contents: dict):

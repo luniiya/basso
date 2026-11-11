@@ -1,0 +1,41 @@
+[package]
+name = "basso-client"
+description = "A headless Minecraft client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+basso-block.workspace = true
+basso-buf.workspace = true
+basso-chat.workspace = true
+basso-core.workspace = true
+basso-entity.workspace = true
+basso-inventory.workspace = true
+basso-physics.workspace = true
+basso-registry.workspace = true
+basso-world.workspace = true
+bevy_app.workspace = true
+bevy_ecs.workspace = true
+bevy_log = { workspace = true, optional = true }
+bevy_tasks.workspace = true
+bevy_time.workspace = true
+derive_more = { workspace = true, features = ["deref", "deref_mut"] }
+indexmap.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
+uuid.workspace = true
+# TODO: this is here to make bevy show system names in conflict warnings.
+# in bevy 0.18, we should be able to just enable the debug feature on bevy_ecs instead.
+bevy_utils = { workspace = true, features = ["debug"] }
+
+[features]
+default = ["log"]
+# enables bevy_log::LogPlugin by default
+log = ["bevy_log"]
+
+[lints]
+workspace = true

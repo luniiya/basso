@@ -8,7 +8,7 @@ from lib.utils import (
     to_camel_case,
 )
 
-TAGS_DIR = get_dir_location("../azalea-registry/src/tags")
+TAGS_DIR = get_dir_location("../basso-registry/src/tags")
 
 
 def generate_tags(

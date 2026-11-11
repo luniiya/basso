@@ -4,8 +4,8 @@ import lib.extract
 from lib.utils import identifier_to_path, to_camel_case, to_snake_case
 
 
-DATA_COMPONENTS_DIR = "azalea-inventory/src/components/mod.rs"
-DEFAULT_DATA_COMPONENTS_DIR = "azalea-inventory/src/default_components/generated.rs"
+DATA_COMPONENTS_DIR = "basso-inventory/src/components/mod.rs"
+DEFAULT_DATA_COMPONENTS_DIR = "basso-inventory/src/default_components/generated.rs"
 
 
 def generate(version_id: str):
@@ -179,9 +179,9 @@ def update_default_variants(version_id: str):
 
 use std::collections::HashMap;
 
-use azalea_chat::translatable_component::TranslatableComponent;
-use azalea_core::attribute_modifier_operation::AttributeModifierOperation;
-use azalea_registry::{
+use basso_chat::translatable_component::TranslatableComponent;
+use basso_core::attribute_modifier_operation::AttributeModifierOperation;
+use basso_registry::{
     DataRegistry, HolderSet,
     builtin::{Attribute, BlockKind, EntityKind, ItemKind, MobEffect, SoundEvent},
 };
@@ -423,17 +423,17 @@ use crate::{
                 )
                 return f"HolderSet::Direct {{ contents: {main_vec} }}"
             elif target_rust_type.startswith(
-                "azalea_registry::Holder<"
+                "basso_registry::Holder<"
             ) or target_rust_type.startswith("Holder<"):
                 holder_type = target_rust_type.split("<", 1)[1].split(",", 1)[0]
                 inner_type = python_to_rust_value(python_value, holder_type)
-                return f"azalea_registry::Holder::Reference({inner_type})"
+                return f"basso_registry::Holder::Reference({inner_type})"
             elif target_rust_type == "Identifier":
                 # convert minecraft:air into Identifier::from_static("minecraft:air")
                 return f'"{python_value}".into()'
-            elif target_rust_type.startswith("azalea_registry::data::"):
+            elif target_rust_type.startswith("basso_registry::data::"):
                 # TODO: this is intentionally incorrect, see the comment in
-                # azalea-registry/src/data.rs to see how to fix this properly
+                # basso-registry/src/data.rs to see how to fix this properly
                 return f"{target_rust_type}::new_raw(0)"
             else:
                 # enum variant
@@ -482,7 +482,7 @@ use crate::{
                         pass
                     else:
                         vectors.append(
-                            f"azalea_registry::tags::{tag_module}::{tag_name}.clone().into_iter().collect()"
+                            f"basso_registry::tags::{tag_module}::{tag_name}.clone().into_iter().collect()"
                         )
 
                     continue

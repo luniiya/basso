@@ -1,7 +1,7 @@
 from lib.utils import get_dir_location, identifier_to_path, to_camel_case
 
-BUILTIN_REGISTRIES_DIR = get_dir_location("../azalea-registry/src/builtin.rs")
-DATA_REGISTRIES_DIR = get_dir_location("../azalea-registry/src/data.rs")
+BUILTIN_REGISTRIES_DIR = get_dir_location("../basso-registry/src/builtin.rs")
+DATA_REGISTRIES_DIR = get_dir_location("../basso-registry/src/data.rs")
 
 
 def generate_builtin_registries(registries: dict):

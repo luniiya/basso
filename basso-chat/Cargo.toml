@@ -1,0 +1,25 @@
+[package]
+name = "basso-chat"
+description = "Parse Minecraft chat messages."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+simdnbt = ["dep:simdnbt"]
+basso-buf = ["dep:basso-buf", "simdnbt"]
+numbers = ["dep:basso-registry", "dep:simdnbt"]
+
+[dependencies]
+basso-buf = { workspace = true, optional = true, features = ["serde_json"] }
+basso-language.workspace = true
+basso-registry = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+simdnbt = { workspace = true, optional = true }
+tracing.workspace = true
+
+[lints]
+workspace = true
