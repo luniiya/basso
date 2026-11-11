@@ -23,6 +23,12 @@ picked from it.
 
 Just forked: the code is still Azalea as of `0.16.0+mc26.2` (Minecraft 26.2). Nothing is wired to Horizon yet.
 
+## Tests
+
+Run the tests for everything you change (`cargo test -p <crate>`, and `cargo test --workspace` before calling a task
+done), and write as many unit tests as possible: every new function, fix or behaviour gets tests, a fix gets one that
+fails without it. Never call work done while a test fails.
+
 ## License
 
 MIT, see [LICENSE.md](LICENSE.md). Azalea's copyright notice is kept there.

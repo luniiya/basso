@@ -43,11 +43,12 @@ use crate::{
 ///
 /// ```
 /// use azalea::{
-///     pathfinder::execute::simulation::SimulationPathfinderExecutionPlugin, swarm::prelude::*,
+///     app::App,
+///     pathfinder::execute::simulation::SimulationPathfinderExecutionPlugin,
 /// };
 ///
-/// let builder = SwarmBuilder::new().add_plugins(SimulationPathfinderExecutionPlugin);
-/// // ...
+/// let mut app = App::new();
+/// app.add_plugins(SimulationPathfinderExecutionPlugin);
 /// ```
 ///
 /// [`DefaultPathfinderExecutionPlugin`]: super::DefaultPathfinderExecutionPlugin

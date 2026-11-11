@@ -647,6 +647,18 @@ use crate::{
             code.append("    }")
             code.append("}")
 
+    # every other component gets the trait's default (no default value)
+    implemented = {
+        line.split()[3]
+        for line in code
+        if line.startswith("impl DefaultableComponent for ")
+    }
+    code.append("")
+    for variant in get_actual_variants():
+        if variant not in implemented:
+            code.append(f"impl DefaultableComponent for {variant} {{}}")
+    code.append("")
+
     with open(DEFAULT_DATA_COMPONENTS_DIR, "w") as f:
         f.write("\n".join(code))
 

@@ -3,14 +3,16 @@ use azalea_entity::{
     Attributes, Physics, indexing::EntityIdIndex, metadata::Sprinting, update_bounding_box,
 };
 use azalea_physics::PhysicsSystems;
-use azalea_protocol::packets::game::ServerboundAttack;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use derive_more::{Deref, DerefMut};
 use tracing::warn;
 
-use super::packet::game::SendGamePacketEvent;
-use crate::{interact::SwingArmEvent, movement::MoveEventsSystems, respawn::perform_respawn};
+use crate::{
+    interact::SwingArmEvent,
+    movement::MoveEventsSystems,
+    packet::{SendGamePacketEvent, ServerboundAttack},
+};
 
 pub struct AttackPlugin;
 impl Plugin for AttackPlugin {
@@ -20,8 +22,7 @@ impl Plugin for AttackPlugin {
                 Update,
                 handle_attack_event
                     .before(update_bounding_box)
-                    .before(MoveEventsSystems)
-                    .after(perform_respawn),
+                    .before(MoveEventsSystems),
             )
             .add_systems(
                 GameTick,
@@ -29,9 +30,7 @@ impl Plugin for AttackPlugin {
                     increment_ticks_since_last_attack,
                     update_attack_strength_scale.after(PhysicsSystems),
                     // in vanilla, handle_attack_queued is part of `handleKeybinds`
-                    handle_attack_queued
-                        .before(super::movement::update_pose)
-                        .before(super::tick_end::game_tick_packet),
+                    handle_attack_queued.before(super::movement::update_pose),
                 )
                     .chain(),
             );

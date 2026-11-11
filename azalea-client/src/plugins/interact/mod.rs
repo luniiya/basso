@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use azalea_block::BlockState;
 use azalea_core::{
-    delta::LpVec3,
     direction::Direction,
     game_type::GameMode,
     hit_result::{BlockHitResult, HitResult},
@@ -25,10 +24,6 @@ use azalea_physics::{
     PhysicsSystems, client_movement::ClientMovementState,
     collision::entity_collisions::update_last_bounding_box,
 };
-use azalea_protocol::packets::game::{
-    ServerboundInteract, ServerboundUseItem, s_interact::InteractionHand,
-    s_swing::ServerboundSwing, s_use_item_on::ServerboundUseItemOn,
-};
 use azalea_world::World;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -41,8 +36,10 @@ use crate::{
     inventory::InventorySystems,
     local_player::PermissionLevel,
     movement::MoveEventsSystems,
-    packet::game::SendGamePacketEvent,
-    respawn::perform_respawn,
+    packet::{
+        InteractionHand, SendGamePacketEvent, ServerboundInteract, ServerboundSwing,
+        ServerboundUseItem, ServerboundUseItemOn,
+    },
 };
 
 /// A plugin that allows clients to interact with blocks in the world.
@@ -61,7 +58,6 @@ impl Plugin for InteractPlugin {
                 )
                     .after(InventorySystems)
                     .after(MoveEventsSystems)
-                    .after(perform_respawn)
                     .after(handle_attack_event)
                     .chain(),
             )
@@ -104,10 +100,8 @@ impl BlockStatePredictionHandler {
     /// prediction.
     ///
     /// This is used to make sure that we can rollback to this state if the
-    /// server acknowledges the sequence number (with
-    /// [`ClientboundBlockChangedAck`]) without having sent a block update.
-    ///
-    /// [`ClientboundBlockChangedAck`]: azalea_protocol::packets::game::ClientboundBlockChangedAck
+    /// server acknowledges the sequence number without having sent a block
+    /// update.
     pub fn retain_known_server_state(
         &mut self,
         pos: BlockPos,
@@ -124,12 +118,10 @@ impl BlockStatePredictionHandler {
             });
     }
 
-    /// Save this update as the correct server state so when the server sends a
-    /// [`ClientboundBlockChangedAck`] we don't roll back this new update.
+    /// Save this update as the correct server state so when the server
+    /// acknowledges the sequence number we don't roll back this new update.
     ///
     /// This should be used when we receive a block update from the server.
-    ///
-    /// [`ClientboundBlockChangedAck`]: azalea_protocol::packets::game::ClientboundBlockChangedAck
     pub fn update_known_server_state(&mut self, pos: BlockPos, state: BlockState) -> bool {
         if let Some(s) = self.server_state.get_mut(&pos) {
             s.block_state = state;
@@ -271,7 +263,7 @@ pub fn handle_start_use_item_queued(
                         entity,
                         ServerboundUseItemOn {
                             hand: start_use_item.hand,
-                            block_hit: r.into(),
+                            block_hit: r.clone(),
                             seq,
                         },
                     ));
@@ -352,7 +344,7 @@ pub fn handle_entity_interact(
     let interact = ServerboundInteract {
         entity_id,
         hand: InteractionHand::MainHand,
-        location: LpVec3::from(location),
+        location,
         using_secondary_action: physics_state.trying_to_crouch,
     };
     commands.trigger(SendGamePacketEvent::new(trigger.client, interact.clone()));

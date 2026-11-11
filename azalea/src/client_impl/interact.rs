@@ -1,6 +1,6 @@
 use azalea_client::interact::{EntityInteractEvent, StartUseItemEvent, pick::HitResultComponent};
 use azalea_core::{hit_result::HitResult, position::BlockPos};
-use azalea_protocol::packets::game::s_interact::InteractionHand;
+use azalea_client::InteractionHand;
 use bevy_ecs::entity::Entity;
 
 use crate::{Client, client_impl::error::AzaleaResult};

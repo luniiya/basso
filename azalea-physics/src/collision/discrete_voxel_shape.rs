@@ -8,7 +8,8 @@ use azalea_core::{
 
 use super::mergers::IndexMerger;
 
-pub trait IntLineConsumer = FnMut(u32, u32, u32, u32, u32, u32);
+pub trait IntLineConsumer: FnMut(u32, u32, u32, u32, u32, u32) {}
+impl<T: FnMut(u32, u32, u32, u32, u32, u32)> IntLineConsumer for T {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscreteVoxelShape {

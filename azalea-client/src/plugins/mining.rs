@@ -6,7 +6,6 @@ use azalea_entity::{
 };
 use azalea_inventory::ItemStack;
 use azalea_physics::{PhysicsSystems, collision::BlockWithShape};
-use azalea_protocol::packets::game::s_player_action::{self, ServerboundPlayerAction};
 use azalea_registry::builtin::{BlockKind, ItemKind};
 use azalea_world::{WorldName, Worlds};
 use bevy_app::{App, Plugin, Update};
@@ -22,7 +21,7 @@ use crate::{
     inventory::InventorySystems,
     local_player::{PermissionLevel, WorldHolder},
     movement::MoveEventsSystems,
-    packet::game::SendGamePacketEvent,
+    packet::{PlayerActionType, SendGamePacketEvent, ServerboundPlayerAction},
 };
 
 /// A plugin that allows clients to break blocks in the world.
@@ -285,7 +284,7 @@ pub fn handle_mining_queued(
             commands.trigger(SendGamePacketEvent::new(
                 entity,
                 ServerboundPlayerAction {
-                    action: s_player_action::Action::StartDestroyBlock,
+                    action: PlayerActionType::StartDestroyBlock,
                     pos: mining_queued.position,
                     direction: mining_queued.direction,
                     seq: sequence_number.start_predicting(),
@@ -310,7 +309,7 @@ pub fn handle_mining_queued(
                 commands.trigger(SendGamePacketEvent::new(
                     entity,
                     ServerboundPlayerAction {
-                        action: s_player_action::Action::AbortDestroyBlock,
+                        action: PlayerActionType::AbortDestroyBlock,
                         pos: current_mining_pos
                             .expect("IsMining is true so MineBlockPos must be present"),
                         direction: mining_queued.direction,
@@ -375,7 +374,7 @@ pub fn handle_mining_queued(
             commands.trigger(SendGamePacketEvent::new(
                 entity,
                 ServerboundPlayerAction {
-                    action: s_player_action::Action::StartDestroyBlock,
+                    action: PlayerActionType::StartDestroyBlock,
                     pos: mining_queued.position,
                     direction: mining_queued.direction,
                     seq: sequence_number.start_predicting(),
@@ -552,7 +551,7 @@ pub fn handle_stop_mining_block_event(
         commands.trigger(SendGamePacketEvent::new(
             event.entity,
             ServerboundPlayerAction {
-                action: s_player_action::Action::AbortDestroyBlock,
+                action: PlayerActionType::AbortDestroyBlock,
                 pos: mine_block_pos,
                 direction: Direction::Down,
                 seq: 0,
@@ -623,7 +622,7 @@ pub fn continue_mining_block(
             commands.trigger(SendGamePacketEvent::new(
                 entity,
                 ServerboundPlayerAction {
-                    action: s_player_action::Action::StartDestroyBlock,
+                    action: PlayerActionType::StartDestroyBlock,
                     pos: mining.pos,
                     direction: mining.dir,
                     seq: prediction_handler.start_predicting(),
@@ -680,7 +679,7 @@ pub fn continue_mining_block(
                 commands.trigger(SendGamePacketEvent::new(
                     entity,
                     ServerboundPlayerAction {
-                        action: s_player_action::Action::StopDestroyBlock,
+                        action: PlayerActionType::StopDestroyBlock,
                         pos: mining.pos,
                         direction: mining.dir,
                         seq: prediction_handler.start_predicting(),

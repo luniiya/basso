@@ -16,20 +16,11 @@ use crate::pathfinder::moves::should_mine_block_state;
 /// ```
 /// # use azalea::prelude::*;
 /// # use azalea::pathfinder::debug::PathfinderDebugParticles;
-/// # #[derive(Clone, Component, Default)]
-/// # pub struct State;
-///
-/// async fn handle(mut bot: Client, event: azalea::Event, state: State) -> eyre::Result<()> {
-///     match event {
-///         azalea::Event::Init => {
-///             bot.ecs
-///                 .write()
-///                 .entity_mut(bot.entity)
-///                 .insert(PathfinderDebugParticles);
-///         }
-///         _ => {}
-///     }
-///     Ok(())
+/// fn enable_debug_particles(bot: &Client) {
+///     bot.ecs
+///         .write()
+///         .entity_mut(bot.entity)
+///         .insert(PathfinderDebugParticles);
 /// }
 /// ```
 #[derive(Component)]

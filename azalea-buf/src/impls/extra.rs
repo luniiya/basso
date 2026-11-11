@@ -8,7 +8,7 @@ use std::{
 use indexmap::IndexMap;
 
 use crate::{
-    AzBuf, AzBufLimited, AzBufVar, BufReadError, MAX_STRING_LENGTH, UnsizedByteArray, read_bytes,
+    AzBuf, AzBufLimited, AzBufVar, BufReadError, MAX_STRING_LENGTH, UnsizedByteArray,
     read_utf_with_len, write_utf_with_len,
 };
 
@@ -73,7 +73,7 @@ impl_for_map_type!(IndexMap);
 macro_rules! impl_for_list_type {
     ($ty: ty) => {
         impl<T: AzBuf> AzBuf for $ty {
-            default fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
+            fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
                 let length = u32::azalea_read_var(buf)? as usize;
                 // we limit the capacity to not get exploited into allocating a bunch
                 let mut contents = Vec::with_capacity(usize::min(length, 65536));
@@ -82,7 +82,7 @@ macro_rules! impl_for_list_type {
                 }
                 Ok(contents.into())
             }
-            default fn azalea_write(&self, buf: &mut impl Write) -> io::Result<()> {
+            fn azalea_write(&self, buf: &mut impl Write) -> io::Result<()> {
                 (self.len() as u32).azalea_write_var(buf)?;
                 for item in self.iter() {
                     T::azalea_write(item, buf)?;
@@ -136,28 +136,6 @@ impl_for_list_type!(Box<[T]>);
 // `Vec<T>` to `Arc<[T]>` results in allocations (since `Arc` stores the
 // counters on the heap) and we'd like to avoid that. for us it's typically
 // better to do `Arc<Box<[T]>>`.
-
-impl AzBuf for Vec<u8> {
-    fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
-        let length = i32::azalea_read_var(buf)? as usize;
-        read_bytes(buf, length).map(|b| b.to_vec())
-    }
-    fn azalea_write(&self, buf: &mut impl Write) -> io::Result<()> {
-        (self.len() as u32).azalea_write_var(buf)?;
-        buf.write_all(self)
-    }
-}
-
-impl AzBuf for Box<[u8]> {
-    fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {
-        let length = i32::azalea_read_var(buf)? as usize;
-        read_bytes(buf, length).map(Box::from)
-    }
-    fn azalea_write(&self, buf: &mut impl Write) -> io::Result<()> {
-        (self.len() as u32).azalea_write_var(buf)?;
-        buf.write_all(self)
-    }
-}
 
 impl AzBuf for String {
     fn azalea_read(buf: &mut Cursor<&[u8]>) -> Result<Self, BufReadError> {

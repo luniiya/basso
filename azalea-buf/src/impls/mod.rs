@@ -4,7 +4,6 @@ mod extra;
 mod primitives;
 
 use std::{
-    backtrace::Backtrace,
     io::{self, Cursor, Write},
 };
 
@@ -61,7 +60,6 @@ pub enum BufReadError {
     #[error("{source}")]
     Io {
         #[from]
-        #[backtrace]
         source: io::Error,
     },
     #[error("Invalid UTF-8: {bytes:?} (lossy: {lossy:?})")]
@@ -78,7 +76,6 @@ pub enum BufReadError {
     UnexpectedEof {
         attempted_read: usize,
         actual_read: usize,
-        backtrace: Backtrace,
     },
     #[error("{0}")]
     Custom(String),
@@ -86,19 +83,16 @@ pub enum BufReadError {
     #[error("{source}")]
     Deserialization {
         #[from]
-        #[backtrace]
         source: serde_json::Error,
     },
     #[error("{source}")]
     Nbt {
         #[from]
-        #[backtrace]
         source: simdnbt::Error,
     },
     #[error("{source}")]
     DeserializeNbt {
         #[from]
-        #[backtrace]
         source: simdnbt::DeserializeError,
     },
 }
@@ -111,7 +105,6 @@ pub(crate) fn read_bytes<'a>(
         return Err(BufReadError::UnexpectedEof {
             attempted_read: length,
             actual_read: buf.get_ref().len() - buf.position() as usize,
-            backtrace: Backtrace::capture(),
         });
     }
     let initial_position = buf.position() as usize;

@@ -34,10 +34,10 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 use simdnbt::owned::{Nbt, NbtCompound};
 use tracing::trace;
 
-use crate::{ItemStack, item::consume_effect::ConsumeEffect};
+use crate::{ItemStack, default_components::DefaultableComponent, item::consume_effect::ConsumeEffect};
 
 pub trait DataComponentTrait:
-    Send + Sync + Any + Clone + Serialize + Into<DataComponentUnion>
+    Send + Sync + Any + Clone + Serialize + Into<DataComponentUnion> + DefaultableComponent
 {
     const KIND: DataComponentKind;
 }

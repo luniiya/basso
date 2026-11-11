@@ -1,6 +1,3 @@
-#![allow(incomplete_features)]
-#![feature(gca_min_const_items, gca_const_items)]
-#![feature(generic_const_items)]
 #![doc = include_str!("../README.md")]
 
 pub mod aabb;

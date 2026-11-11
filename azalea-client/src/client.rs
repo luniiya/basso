@@ -8,7 +8,7 @@ use std::{
 
 use azalea_core::tick::GameTick;
 use azalea_entity::{
-    EntityUpdateSystems, PlayerAbilities, indexing::EntityIdIndex, inventory::Inventory,
+    PlayerAbilities, indexing::EntityIdIndex, inventory::Inventory,
 };
 use azalea_physics::client_movement::ClientMovementState;
 use azalea_world::Worlds;
@@ -25,23 +25,14 @@ use tracing::{info, warn};
 use crate::{
     attack,
     block_update::QueuedServerBlockUpdates,
-    chunks::ChunkBatchInfo,
-    connection::RawConnection,
-    cookies::ServerCookies,
     interact::BlockStatePredictionHandler,
     local_player::{Experience, Hunger, PermissionLevel, TabList, TabListResource, WorldHolder},
     mining,
     movement::LastSentLookDirection,
-    player::retroactively_add_game_profile_component,
 };
-/// A bundle of components that's inserted right when we switch to the `login`
-/// state and stay present on our clients until we disconnect.
-///
-/// For the components that are only present in the `game` state, see
-/// [`JoinedClientBundle`].
+/// A bundle of components that's present on our simulated local players.
 #[derive(Bundle)]
 pub struct LocalPlayerBundle {
-    pub raw_connection: RawConnection,
     pub world_holder: WorldHolder,
 
     pub metadata: azalea_entity::metadata::PlayerMetadataBundle,
@@ -49,8 +40,6 @@ pub struct LocalPlayerBundle {
 
 /// A bundle for the components that are present on a local player that is
 /// currently in the `game` protocol state.
-///
-/// All of these components are also removed when the client disconnects.
 ///
 /// If you want to filter for this, use [`InGameState`].
 #[derive(Bundle, Default)]
@@ -64,10 +53,8 @@ pub struct JoinedClientBundle {
     pub last_sent_direction: LastSentLookDirection,
     pub abilities: PlayerAbilities,
     pub permission_level: PermissionLevel,
-    pub chunk_batch_info: ChunkBatchInfo,
     pub hunger: Hunger,
     pub experience: Experience,
-    pub cookies: ServerCookies,
 
     pub entity_id_index: EntityIdIndex,
 
@@ -81,25 +68,12 @@ pub struct JoinedClientBundle {
 /// `game` state.
 #[derive(Clone, Component, Debug, Default)]
 pub struct InGameState;
-/// A marker component for local players that are currently in the
-/// `configuration` state.
-#[derive(Clone, Component, Debug, Default)]
-pub struct InConfigState;
 
 pub struct AzaleaPlugin;
 impl Plugin for AzaleaPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                // add GameProfileComponent when we get an AddPlayerEvent
-                retroactively_add_game_profile_component
-                    .after(EntityUpdateSystems::Index)
-                    .after(crate::join::handle_start_join_server_event),
-            ),
-        )
-        .init_resource::<Worlds>()
-        .init_resource::<TabListResource>();
+        app.init_resource::<Worlds>()
+            .init_resource::<TabListResource>();
     }
 }
 
@@ -108,7 +82,7 @@ impl Plugin for AzaleaPlugin {
 /// before any systems start running.
 ///
 /// You can create your app with `App::new()`, but don't forget to add
-/// [`DefaultPlugins`].
+/// [`DefaultPlugins`](crate::DefaultPlugins).
 ///
 /// # Panics
 ///
@@ -216,9 +190,6 @@ async fn run_schedule_loop(
             // it's possible for references to the World to stay around, so we
             // clear the ecs
             ecs.clear_all();
-            // ^ note that this also forcefully disconnects all of our bots
-            // without sending a disconnect packet (which is fine
-            // because we want to disconnect immediately)
 
             return exit;
         }

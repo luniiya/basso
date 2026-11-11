@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
-#![feature(min_specialization)]
 
 pub mod components;
 pub mod default_components;
+pub mod game_profile;
 pub mod item;
 pub mod operations;
 mod slot;

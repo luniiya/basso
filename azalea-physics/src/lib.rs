@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![feature(trait_alias)]
 
 pub mod client_movement;
 pub mod clip;

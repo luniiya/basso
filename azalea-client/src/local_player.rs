@@ -7,7 +7,10 @@ use derive_more::{Deref, DerefMut};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::{ClientInformation, player::PlayerInfo};
+use crate::player::PlayerInfo;
+
+/// The render distance that simulated worlds get by default.
+const DEFAULT_VIEW_DISTANCE: u8 = 8;
 
 /// A component that keeps strong references to our [`PartialWorld`] and
 /// [`World`] for local players.
@@ -142,14 +145,10 @@ impl WorldHolder {
     /// be set to a default value, which you can change by creating a new
     /// partial world.
     pub fn new(entity: Entity, shared: Arc<RwLock<World>>) -> Self {
-        let client_information = ClientInformation::default();
-
         WorldHolder {
             shared,
             partial: Arc::new(RwLock::new(PartialWorld::new(
-                azalea_world::chunk::calculate_chunk_storage_range(
-                    client_information.view_distance.into(),
-                ),
+                azalea_world::chunk::calculate_chunk_storage_range(DEFAULT_VIEW_DISTANCE.into()),
                 Some(entity),
             ))),
         }

@@ -23,19 +23,6 @@ use azalea_physics::{
     collision::entity_collisions::{AabbQuery, CollidableEntityQuery, update_last_bounding_box},
     travel::{no_collision, travel},
 };
-use azalea_protocol::{
-    common::movements::MoveFlags,
-    packets::{
-        Packet,
-        game::{
-            ServerboundPlayerCommand, ServerboundPlayerInput,
-            s_move_player_pos::ServerboundMovePlayerPos,
-            s_move_player_pos_rot::ServerboundMovePlayerPosRot,
-            s_move_player_rot::ServerboundMovePlayerRot,
-            s_move_player_status_only::ServerboundMovePlayerStatusOnly, s_player_command,
-        },
-    },
-};
 use azalea_registry::builtin::{EntityKind, MobEffect};
 use azalea_world::World;
 use bevy_app::{App, Plugin, Update};
@@ -43,7 +30,11 @@ use bevy_ecs::prelude::*;
 
 use crate::{
     local_player::{Hunger, WorldHolder},
-    packet::game::SendGamePacketEvent,
+    packet::{
+        MoveFlags, PlayerCommandAction, SendGamePacketEvent, ServerboundGamePacket,
+        ServerboundMovePlayerPos, ServerboundMovePlayerPosRot, ServerboundMovePlayerRot,
+        ServerboundMovePlayerStatusOnly, ServerboundPlayerCommand, ServerboundPlayerInput,
+    },
 };
 
 pub struct MovementPlugin;
@@ -153,32 +144,31 @@ pub fn send_position(
                 horizontal_collision: physics.horizontal_collision,
             };
             let packet = if sending_position && sending_direction {
-                Some(
+                Some(ServerboundGamePacket::MovePlayerPosRot(
                     ServerboundMovePlayerPosRot {
                         pos: **position,
                         look_direction: *direction,
                         flags,
-                    }
-                    .into_variant(),
-                )
+                    },
+                ))
             } else if sending_position {
-                Some(
+                Some(ServerboundGamePacket::MovePlayerPos(
                     ServerboundMovePlayerPos {
                         pos: **position,
                         flags,
-                    }
-                    .into_variant(),
-                )
+                    },
+                ))
             } else if sending_direction {
-                Some(
+                Some(ServerboundGamePacket::MovePlayerRot(
                     ServerboundMovePlayerRot {
                         look_direction: *direction,
                         flags,
-                    }
-                    .into_variant(),
-                )
+                    },
+                ))
             } else if physics.last_on_ground() != physics.on_ground() {
-                Some(ServerboundMovePlayerStatusOnly { flags }.into_variant())
+                Some(ServerboundGamePacket::MovePlayerStatusOnly(
+                    ServerboundMovePlayerStatusOnly { flags },
+                ))
             } else {
                 None
             };
@@ -238,7 +228,7 @@ pub fn send_player_input_packet(
         if input != last_sent_input.0 {
             commands.trigger(SendGamePacketEvent {
                 sent_by: entity,
-                packet: input.clone().into_variant(),
+                packet: ServerboundGamePacket::PlayerInput(input.clone()),
             });
             commands.entity(entity).insert(LastSentInput(input));
         }
@@ -258,9 +248,9 @@ pub fn send_sprinting_if_needed(
         let was_sprinting = physics_state.was_sprinting;
         if **sprinting != was_sprinting {
             let sprinting_action = if **sprinting {
-                s_player_command::Action::StartSprinting
+                PlayerCommandAction::StartSprinting
             } else {
-                s_player_command::Action::StopSprinting
+                PlayerCommandAction::StopSprinting
             };
             commands.trigger(SendGamePacketEvent::new(
                 entity,
@@ -489,9 +479,9 @@ pub fn process_fall_flying_activation(
             **fall_flying = true; // Player.startFallFlying()
             commands.trigger(SendGamePacketEvent::new(
                 entity,
-                s_player_command::ServerboundPlayerCommand {
+                ServerboundPlayerCommand {
                     id: *minecraft_entity_id,
-                    action: s_player_command::Action::StartFallFlying,
+                    action: PlayerCommandAction::StartFallFlying,
                     data: 0,
                 },
             ));

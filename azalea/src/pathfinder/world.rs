@@ -123,13 +123,13 @@ impl Debug for CachedSection {
 #[derive(Default)]
 pub struct SectionBitsets {
     /// Blocks that we can fully pass through (like air).
-    pub passable: FastFixedBitSet<4096>,
+    pub passable: FastFixedBitSet<64>,
     /// Blocks that we can stand on and do parkour from.
-    pub solid: FastFixedBitSet<4096>,
+    pub solid: FastFixedBitSet<64>,
     /// Blocks that we can stand on but might not be able to parkour from.
-    pub standable: FastFixedBitSet<4096>,
+    pub standable: FastFixedBitSet<64>,
     /// Water source blocks.
-    pub water: FastFixedBitSet<4096>,
+    pub water: FastFixedBitSet<64>,
 }
 
 impl CachedWorld {
@@ -243,10 +243,10 @@ impl CachedWorld {
         let bitsets = self
             .with_section(section_pos, |section| {
                 let mut bitsets = SectionBitsets {
-                    passable: FastFixedBitSet::<4096>::new(),
-                    solid: FastFixedBitSet::<4096>::new(),
-                    standable: FastFixedBitSet::<4096>::new(),
-                    water: FastFixedBitSet::<4096>::new(),
+                    passable: FastFixedBitSet::<64>::new(),
+                    solid: FastFixedBitSet::<64>::new(),
+                    standable: FastFixedBitSet::<64>::new(),
+                    water: FastFixedBitSet::<64>::new(),
                 };
 
                 for i in 0..4096 {

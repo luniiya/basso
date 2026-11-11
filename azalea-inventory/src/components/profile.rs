@@ -1,4 +1,4 @@
-use azalea_auth::game_profile::{
+use crate::game_profile::{
     GameProfile, GameProfileProperties, SerializableProfileProperties,
 };
 use azalea_buf::AzBuf;

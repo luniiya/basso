@@ -1,20 +1,15 @@
 [workspace]
 members = [
     "azalea",
-    "azalea-auth",
     "azalea-block",
-    "azalea-brigadier",
     "azalea-buf",
     "azalea-chat",
     "azalea-client",
     "azalea-core",
-    "azalea-crypto",
     "azalea-entity",
     "azalea-inventory",
     "azalea-language",
     "azalea-physics",
-    "azalea-protocol",
-    "azalea-protocol/fuzz",
     "azalea-registry",
     "azalea-world",
 ]
@@ -26,7 +21,7 @@ resolver = "3"
 version = "0.16.0+mc26.2"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/azalea-rs/azalea"
+repository = "https://github.com/luniiya/basso"
 # homepage = "https://github.com/azalea-rs/azalea"
 
 [workspace.dependencies]
@@ -90,21 +85,16 @@ radix-heap = "0.4.2"
 
 azalea-block-macros = { path = "azalea-block/azalea-block-macros", version = "0.16.0", default-features = false }
 azalea-block = { path = "azalea-block", version = "0.16.0", default-features = false }
-azalea-auth = { path = "azalea-auth", version = "0.16.0", default-features = false }
-azalea-brigadier = { path = "azalea-brigadier", version = "0.16.0", default-features = false }
 azalea-buf-macros = { path = "azalea-buf/azalea-buf-macros", version = "0.16.0", default-features = false }
 azalea-buf = { path = "azalea-buf", version = "0.16.0", default-features = false }
 azalea-chat = { path = "azalea-chat", version = "0.16.0", default-features = false }
 azalea-client = { path = "azalea-client", version = "0.16.0", default-features = false }
 azalea-core = { path = "azalea-core", version = "0.16.0", default-features = false }
-azalea-crypto = { path = "azalea-crypto", version = "0.16.0", default-features = false }
 azalea-entity = { path = "azalea-entity", version = "0.16.0", default-features = false }
 azalea-inventory-macros = { path = "azalea-inventory/azalea-inventory-macros", version = "0.16.0", default-features = false }
 azalea-inventory = { path = "azalea-inventory", version = "0.16.0", default-features = false }
 azalea-language = { path = "azalea-language", version = "0.16.0", default-features = false }
 azalea-physics = { path = "azalea-physics", version = "0.16.0", default-features = false }
-azalea-protocol-macros = { path = "azalea-protocol/azalea-protocol-macros", version = "0.16.0", default-features = false }
-azalea-protocol = { path = "azalea-protocol", version = "0.16.0", default-features = false }
 azalea-registry-macros = { path = "azalea-registry/azalea-registry-macros", version = "0.16.0", default-features = false }
 azalea-registry = { path = "azalea-registry", version = "0.16.0", default-features = false }
 azalea-world = { path = "azalea-world", version = "0.16.0", default-features = false }
@@ -113,32 +103,14 @@ azalea-world = { path = "azalea-world", version = "0.16.0", default-features = f
 # https://users.rust-lang.org/t/to-string-vs-to-owned-for-string-literals/1441
 str_to_string = "warn"
 
-[workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs_dep)'] }
-
-[workspace.metadata.docs.rs]
-rustc-args = ["--cfg", "docsrs_dep"]
-rustdoc-args = [
-    "--cfg",
-    "docsrs_dep",
-    "--html-after-content",
-    "docs-rs/trait-tags.html",
-    "--html-after-content",
-    "docs-rs/arborium-header.html",
-]
-cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
-
 # --- Profile Settings ---
 
 [profile.release]
 debug = "line-tables-only"
 
-# decoding packets takes forever if we don't do this
-[profile.dev.package.azalea-crypto]
-opt-level = 3
-[profile.dev.package.cfb8]
-opt-level = 3
-[profile.dev.package.aes]
-opt-level = 3
-[profile.dev.package.flate2]
-opt-level = 3
+
+
+# simdnbt needs nightly (portable_simd, allocator_api); the vendored copy is
+# patched to build on stable, like Horizon.
+[patch.crates-io]
+simdnbt = { path = "vendor/simdnbt" }

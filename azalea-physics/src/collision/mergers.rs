@@ -205,7 +205,8 @@ impl IndexMerger {
     }
 }
 
-pub trait IndexConsumer = FnMut(i32, i32, i32) -> bool;
+pub trait IndexConsumer: FnMut(i32, i32, i32) -> bool {}
+impl<T: FnMut(i32, i32, i32) -> bool> IndexConsumer for T {}
 
 fn for_non_swapped_indexes(lower: &[f64], upper: &[f64], mut consumer: impl IndexConsumer) -> bool {
     let var2 = lower.len();

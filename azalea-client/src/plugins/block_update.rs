@@ -3,19 +3,14 @@ use azalea_core::position::BlockPos;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 
-use crate::{
-    chunks::handle_receive_chunk_event, interact::BlockStatePredictionHandler,
-    local_player::WorldHolder,
-};
+use crate::{interact::BlockStatePredictionHandler, local_player::WorldHolder};
 
 pub struct BlockUpdatePlugin;
 impl Plugin for BlockUpdatePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            // has to be after ReceiveChunkEvent is handled so if we get chunk+blockupdate in one
-            // Update then the block update actually gets applied
-            handle_block_update_event.after(handle_receive_chunk_event),
+            handle_block_update_event,
         );
     }
 }

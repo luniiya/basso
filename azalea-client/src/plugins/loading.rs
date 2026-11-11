@@ -1,11 +1,13 @@
 use azalea_core::tick::GameTick;
 use azalea_entity::{HasClientLoaded, InLoadedChunk, LocalEntity, update_in_loaded_chunk};
 use azalea_physics::PhysicsSystems;
-use azalea_protocol::packets::game::ServerboundPlayerLoaded;
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::*;
 
-use crate::{mining::MiningSystems, packet::game::SendGamePacketEvent};
+use crate::{
+    mining::MiningSystems,
+    packet::{SendGamePacketEvent, ServerboundPlayerLoaded},
+};
 
 pub struct PlayerLoadedPlugin;
 impl Plugin for PlayerLoadedPlugin {

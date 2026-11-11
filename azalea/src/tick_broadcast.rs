@@ -61,14 +61,10 @@ impl Client {
     ///
     /// ```
     /// # use azalea::prelude::*;
-    /// # use azalea::container::WaitingForInventoryOpen;
     /// # async fn example(bot: &mut azalea::Client) {
     /// let mut ticks = bot.get_tick_broadcaster();
     /// while ticks.recv().await.is_ok() {
-    ///     let ecs = bot.ecs.read();
-    ///     if ecs.get::<WaitingForInventoryOpen>(bot.entity).is_none() {
-    ///         break;
-    ///     }
+    ///     break;
     /// }
     /// # }
     /// ```
