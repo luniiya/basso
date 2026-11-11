@@ -6,6 +6,7 @@ members = [
     "basso-chat",
     "basso-client",
     "basso-core",
+    "basso-engine",
     "basso-entity",
     "basso-inventory",
     "basso-language",

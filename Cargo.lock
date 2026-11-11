@@ -278,6 +278,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "basso-engine"
+version = "0.1.0"
+
+[[package]]
 name = "basso-entity"
 version = "0.16.0+mc26.2"
 dependencies = [

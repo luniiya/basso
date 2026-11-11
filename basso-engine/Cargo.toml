@@ -1,0 +1,11 @@
+[package]
+name = "basso-engine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Basso's pathfinder for Horizon: search, moves and orders, with no game types"
+
+# Shipped as the native bundle's crate (horizon-mixin.toml): Horizon only allows
+# registry crates that are in its own Cargo.lock, so this has no dependencies.
+[dependencies]
