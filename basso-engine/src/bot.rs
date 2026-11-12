@@ -881,8 +881,8 @@ impl Bot {
                 }
                 self.pending = Some(AStar::new(player.node(), goal.clone(), self.budget));
                 self.search_began = self.ticks;
-                let (from, to) = (player.node(), goal.clone());
-                self.say(2, || format!("Searching from {from} to {to} (mining {allow_mining})."));
+                let (from, to, blocks) = (player.node(), goal.clone(), self.has_blocks);
+                self.say(2, || format!("Searching from {from} to {to} (mining {allow_mining}, blocks {blocks})."));
             }
             let search = self.pending.as_mut().expect("started above");
             let cached = Self::cached(&self.settings, self.has_blocks, world, allow_mining);

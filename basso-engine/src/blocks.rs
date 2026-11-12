@@ -31,6 +31,11 @@ pub struct BlockTraits<'a> {
     /// The top of the highest part of the shape that covers most of the
     /// block's floor (0.5 for a bottom slab), 0 when there is none.
     pub floor_top: f32,
+    /// The best hotbar item's mining speed for this block, 0 when unknown
+    /// (the bare hand is assumed).
+    pub tool_speed: f32,
+    /// That item drops the block.
+    pub tool_harvests: bool,
 }
 
 /// Blocks a player could stand in but should never path through.
@@ -113,6 +118,21 @@ pub fn hand_break_ticks(hardness: f32, requires_tool: bool) -> f32 {
     (hardness * if requires_tool { 100.0 } else { 30.0 }).ceil()
 }
 
+/// Ticks to break a block with the best tool at hand: `speed` is that item's
+/// mining speed for the block and `harvests` whether it drops with it, as in
+/// vanilla's `getDestroyProgress`. The bare hand is speed 1 and harvests only
+/// what needs no tool.
+pub fn break_ticks_with(hardness: f32, requires_tool: bool, speed: f32, harvests: bool) -> f32 {
+    if hardness < 0.0 {
+        return f32::INFINITY;
+    }
+    if hardness == 0.0 {
+        return 1.0;
+    }
+    let speed = if speed > 0.0 { speed } else { 1.0 };
+    (hardness * if requires_tool && !harvests { 100.0 } else { 30.0 } / speed).ceil()
+}
+
 pub fn classify(block: &BlockTraits) -> Cell {
     if block.air {
         return Cell::AIR;
@@ -128,7 +148,9 @@ pub fn classify(block: &BlockTraits) -> Cell {
     // a half block is a floor even where the game's legacy solidity says no
     let half_floor = block.floor_top >= 0.5 && block.floor_top < 1.0;
     let tall = is_tall(name);
-    let collides = block.full_collision || block.legacy_solid || half_floor || tall;
+    let thin_floor = name.ends_with("_trapdoor") && block.floor_top >= 0.1 && block.floor_top < 0.5;
+    // a thin floor is walked into and stood on inside its own block
+    let collides = !thin_floor && (block.full_collision || block.legacy_solid || half_floor || tall);
     let solid = block.full_collision && !avoid;
     let standable = !tall && (solid || (collides && !avoid));
     Cell {
@@ -139,11 +161,15 @@ pub fn classify(block: &BlockTraits) -> Cell {
         liquid,
         falling: FALLING.contains(&name) || name.ends_with("concrete_powder"),
         climbable: CLIMBABLE.contains(&name),
-        thin_floor: name.ends_with("_trapdoor") && block.floor_top >= 0.1 && block.floor_top < 0.5,
+        thin_floor,
         break_ticks: if liquid {
             f32::INFINITY
         } else {
-            hand_break_ticks(block.hardness, block.requires_tool)
+            if block.tool_speed > 0.0 {
+                break_ticks_with(block.hardness, block.requires_tool, block.tool_speed, block.tool_harvests)
+            } else {
+                hand_break_ticks(block.hardness, block.requires_tool)
+            }
         },
     }
 }
@@ -269,6 +295,19 @@ mod tests {
     }
 
     #[test]
+    fn a_solid_trapdoor_is_still_walked_into() {
+        // the game may call a closed trapdoor solid: it must stay passable
+        let closed = BlockTraits {
+            name: "minecraft:oak_trapdoor",
+            floor_top: 0.1875,
+            legacy_solid: true,
+            ..Default::default()
+        };
+        let cell = classify(&closed);
+        assert!(cell.passable && cell.thin_floor && !cell.standable && !cell.solid);
+    }
+
+    #[test]
     fn ladders_and_vines_are_climbable_and_passable() {
         for name in ["minecraft:ladder", "minecraft:vine", "minecraft:cave_vines_plant", "minecraft:twisting_vines"] {
             let cell = classify(&traits(name));
@@ -354,5 +393,33 @@ mod tests {
     fn only_full_cubes_are_buildable() {
         assert!(!is_buildable("minecraft:oak_slab", false));
         assert!(!is_buildable("minecraft:glowstone", false));
+    }
+
+    #[test]
+    fn a_pickaxe_makes_stone_cheap() {
+        // stone: hardness 1.5, needs a tool; a diamond pickaxe is speed 8
+        assert_eq!(hand_break_ticks(1.5, true), 150.0);
+        assert_eq!(break_ticks_with(1.5, true, 8.0, true), 6.0);
+        // a tool that doesn't harvest it breaks it slowly
+        assert_eq!(break_ticks_with(1.5, true, 8.0, false), 19.0);
+        assert_eq!(break_ticks_with(-1.0, true, 8.0, true), f32::INFINITY);
+        assert_eq!(break_ticks_with(0.0, false, 8.0, true), 1.0);
+        // no tool known: the hand
+        assert_eq!(break_ticks_with(0.5, false, 0.0, false), hand_break_ticks(0.5, false));
+    }
+
+    #[test]
+    fn classify_uses_the_tool_when_it_is_given() {
+        let stone = BlockTraits {
+            name: "minecraft:stone",
+            full_collision: true,
+            legacy_solid: true,
+            hardness: 1.5,
+            requires_tool: true,
+            ..Default::default()
+        };
+        assert_eq!(classify(&stone).break_ticks, 150.0);
+        let with_pick = BlockTraits { tool_speed: 8.0, tool_harvests: true, ..stone };
+        assert_eq!(classify(&with_pick).break_ticks, 6.0);
     }
 }

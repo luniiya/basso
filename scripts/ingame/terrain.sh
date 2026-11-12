@@ -33,7 +33,7 @@ reset
 ctl setblock 3 $Y 0 "oak_slab[type=bottom]" >/dev/null
 ctl setblock 5 $Y 0 stone >/dev/null
 ctl setblock 7 $Y 0 stone >/dev/null; ctl setblock 7 $((Y + 1)) 0 "oak_slab[type=bottom]" >/dev/null
-go 9 $((Y + 1)) 0
+go 7 $((Y + 2)) 0
 check "climbs a mix of slabs and blocks" test "$(height)" -ge $((Y + 1))
 
 # a closed door in a wall: through it or around
@@ -91,4 +91,13 @@ go 12 $Y 0
 check "walks over snow and trapdoors" near 12.5 0.5 2
 
 chat "/basso cancel"
+# a bridge of closed trapdoors over a hole: stood on, not fallen through
+reset
+ctl fill 3 $((Y - 5)) 0 8 $((Y - 1)) 0 air >/dev/null
+ctl fill 3 $((Y - 1)) 0 8 $((Y - 1)) 0 "oak_trapdoor[half=bottom,open=false]" >/dev/null
+go 10 $Y 0
+check "crosses a bridge of trapdoors" near 10.5 0.5 2
+check "above the hole after the bridge" test "$(height)" -ge $Y
+alive && ok "alive after the trapdoors" || bad "died on the trapdoors"
+
 summary

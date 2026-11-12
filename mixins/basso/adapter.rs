@@ -77,7 +77,36 @@ fn state() -> MutexGuard<'static, Option<State>> {
 }
 
 /// Horizon's world as the engine reads it.
-struct View<'a, 'g>(&'a Game<'g>);
+struct View<'a, 'g>(&'a Game<'g>, std::cell::RefCell<std::collections::HashMap<String, (f32, bool)>>);
+
+impl<'a, 'g> View<'a, 'g> {
+    fn new(game: &'a Game<'g>) -> Self {
+        Self(game, Default::default())
+    }
+
+    // The best hotbar item's mining speed against a block, and whether it
+    // harvests it, so a path costs a dig with the pickaxe, not the bare hand.
+    fn best_tool(&self, name: &str, requires_tool: bool) -> (f32, bool) {
+        if let Some(found) = self.1.borrow().get(name) {
+            return *found;
+        }
+        let game = self.0;
+        let items = game.res.items();
+        let slots: Vec<SlotSpeed> = (0..9)
+            .map(|i| {
+                let held = game.inventory.get(i).and_then(Option::as_ref);
+                SlotSpeed {
+                    speed: items.mining_speed(held, name),
+                    harvests: !requires_tool || items.correct_for_drops(held, name),
+                }
+            })
+            .collect();
+        let best = slots[tools::best_slot(&slots, 0)];
+        let found = (best.speed, best.harvests);
+        self.1.borrow_mut().insert(name.to_owned(), found);
+        found
+    }
+}
 
 impl BlockView for View<'_, '_> {
     fn cell(&self, p: BlockPos) -> Option<Cell> {
@@ -93,6 +122,11 @@ impl BlockView for View<'_, '_> {
             horizon_client::blocks::Fluid::Water => blocks::Fluid::Water,
             horizon_client::blocks::Fluid::Lava => blocks::Fluid::Lava,
         };
+        let (tool_speed, tool_harvests) = if f.hardness > 0.0 && !facts.is_air(state) {
+            self.best_tool(&f.name, f.requires_tool)
+        } else {
+            (0.0, false)
+        };
         Some(blocks::classify(&BlockTraits {
             name: &f.name,
             air: facts.is_air(state),
@@ -103,6 +137,8 @@ impl BlockView for View<'_, '_> {
             hardness: f.hardness,
             requires_tool: f.requires_tool,
             floor_top: floor_top(&f.outline),
+            tool_speed,
+            tool_harvests,
         }))
     }
 
@@ -276,7 +312,7 @@ pub(super) fn command(game: &mut Game<'_>, line: &str) -> bool {
     let lines = {
         let mut guard = state();
         let st = guard.get_or_insert_with(State::new);
-        st.bot.command(line, &View(game), &player)
+        st.bot.command(line, &View::new(game), &player)
     };
     say(game, lines);
     true
@@ -308,7 +344,7 @@ pub(super) fn tick(game: &mut Game<'_>) {
     let controls = match player_state(game, st.held.sneak) {
         Some(player) => {
             let entities = entities(game);
-            st.bot.tick(&View(game), &player, &entities)
+            st.bot.tick(&View::new(game), &player, &entities)
         }
         // the player is gone (dead, between worlds): keep the order
         None => None,
@@ -391,8 +427,10 @@ fn hand_with_screen_open(game: &mut Game<'_>, was: &Controls, now: &Controls) {
         return;
     }
     let screen = std::mem::replace(&mut game.screen, Screen::Playing);
-    let _ = game.tick_local_hand();
+    let (uc, ac, held) = (game.use_clicks, game.attack_clicks, game.selected);
+    let r = game.tick_local_hand();
     game.screen = screen;
+    chat_line(game, &format!("dbg hand: use_clicks {uc} attack {ac} slot {held} using {} ok {}", game.using.is_some(), r.is_ok()), TEXT_COLOR);
 }
 
 // Baritone's autoTool: the hotbar slot that breaks `target` fastest.
@@ -424,7 +462,7 @@ fn watch_camera(game: &mut Game<'_>, st: &mut State) {
             };
             let eye = vec3(p.position);
             let eye = Vec3::new(eye.x, eye.y + f64::from(game.eye), eye.z);
-            st.cam = Some(FreeCam::behind(eye, game.yaw, &View(game)));
+            st.cam = Some(FreeCam::behind(eye, game.yaw, &View::new(game)));
             st.camera_before = Some(game.camera_type);
             // third person, so the player's body is drawn
             game.camera_type = CameraType::ThirdPersonBack;
@@ -545,7 +583,7 @@ fn aim(game: &Game<'_>, cam: Option<&FreeCam>) -> Option<(Vec3, Vec3)> {
 // The block a click would land on now.
 fn pointed_block(game: &Game<'_>, cam: Option<&FreeCam>) -> Option<BlockPos> {
     let (origin, dir) = aim(game, cam)?;
-    click::pick_block(&View(game), origin, dir, click::REACH)
+    click::pick_block(&View::new(game), origin, dir, click::REACH)
 }
 
 // The outline of the block under the pointer, as Baritone's click screen draws.
@@ -608,7 +646,7 @@ pub(super) fn world_primitives(game: &Game<'_>, primitives: &mut WorldPrimitives
     let Some(player) = player_state(game, false) else {
         return;
     };
-    let view = View(game);
+    let view = View::new(game);
     let path = st.bot.path_nodes();
     let preview = st.bot.search_preview();
     let mut to_break = st.bot.blocks_to_break(&view);
