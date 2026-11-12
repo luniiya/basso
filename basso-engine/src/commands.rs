@@ -25,6 +25,11 @@ pub const COMMAND_HELP: &[(&str, &str, &str)] = &[
     ("cancel", "", "Cancel the current order"),
     ("paused", "", "Tell whether basso is paused"),
     (
+        "click",
+        "",
+        "Toggle click mode: left click goes into the block you point at, right click onto it",
+    ),
+    (
         "set",
         "[setting] [true|false]",
         "List the settings, show one, or change one",
@@ -35,7 +40,7 @@ pub const COMMAND_HELP: &[(&str, &str, &str)] = &[
 
 /// The commands' names, in [`COMMAND_HELP`] order, for completion.
 pub const COMMAND_NAMES: &[&str] = &[
-    "goto", "mine", "follow", "pause", "resume", "cancel", "paused", "set", "toggle", "help",
+    "goto", "mine", "follow", "pause", "resume", "cancel", "paused", "click", "set", "toggle", "help",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,6 +59,7 @@ pub enum Command {
     Resume,
     Cancel,
     Paused,
+    Click,
     Set {
         name: Option<String>,
         value: Option<String>,
@@ -100,6 +106,7 @@ pub fn parse(line: &str, origin: BlockPos) -> Result<Command, String> {
         "resume" => Ok(Command::Resume),
         "cancel" | "stop" => Ok(Command::Cancel),
         "paused" => Ok(Command::Paused),
+        "click" => Ok(Command::Click),
         "set" => match rest {
             [] | [_] | [_, _] => Ok(Command::Set {
                 name: rest.first().cloned(),

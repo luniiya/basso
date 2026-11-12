@@ -54,7 +54,6 @@ pub const TREE: &[Node] = &[
             node("pos", Arg::BlockPos, &[]),
             node("column", Arg::ColumnPos, &[]),
             node("y", Arg::Integer, &[]),
-            node("block", Arg::Block, &[]),
         ],
     ),
     literal(
@@ -76,6 +75,7 @@ pub const TREE: &[Node] = &[
     literal("pause", &[]),
     literal("resume", &[]),
     literal("cancel", &[]),
+    literal("click", &[]),
     literal("stop", &[]),
     literal("paused", &[]),
     literal(
@@ -162,6 +162,14 @@ mod tests {
             assert!(parse(line, origin).is_ok(), "{line}");
         }
         assert_eq!(parse("stop", origin), Ok(Command::Cancel));
+    }
+
+    #[test]
+    fn goto_completes_coordinates_not_block_names() {
+        let goto = TREE.iter().find(|n| n.name == "goto").unwrap();
+        assert!(goto.children.iter().any(|n| n.arg == Arg::BlockPos));
+        // a block id still goes through as free text, but is not suggested
+        assert!(goto.children.iter().all(|n| n.arg != Arg::Block));
     }
 
     #[test]

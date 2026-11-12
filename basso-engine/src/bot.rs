@@ -2,13 +2,14 @@
 //! does about them, after `basso::commands::process` and Baritone's
 //! processes.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     astar::{AStar, Budget, Path},
     commands::{self, Command, FollowTarget},
     executor::{Controls, Executor, PlayerState, Progress},
     goals::Goal,
+    mlg::Mlg,
     pos::{BlockPos, Vec3, yaw_pitch},
     settings::Settings,
     world::{BlockView, CachedWorld},
@@ -28,17 +29,17 @@ const MAX_FAILURES: u32 = 3;
 const VALIDATE_INTERVAL: u64 = 10;
 /// Ticks to wait before searching again after a search failed.
 const RETRY_TICKS: u64 = 40;
-/// Items this close to a mined block are its drops.
-const DROP_RADIUS: f64 = 3.0;
-/// How far away basso goes for items.
-const ITEM_RANGE: f64 = 24.0;
-/// Mined blocks remembered for their drops.
-const MINED_MEMORY: usize = 32;
-/// Ticks to stand on an item that isn't picked up before leaving it.
-const ITEM_PATIENCE: u32 = 40;
 /// Nodes a search looks at each tick; the rest waits for the next tick, so
 /// the search can be drawn while it runs.
 const SEARCH_SLICE: usize = 5_000;
+/// Baritone's `mineGoalUpdateInterval`: ticks between rescans.
+const MINE_GOAL_UPDATE_INTERVAL: u64 = 5;
+/// Baritone's `mineMaxOreLocationsCount`.
+pub const MINE_MAX_ORE_LOCATIONS: usize = 64;
+/// Baritone's `mineDropLoiterDurationMSThanksLouca` (250 ms), in ticks.
+const MINE_DROP_LOITER_TICKS: u64 = 5;
+/// How near a known block must be for its vanishing to count as basso's.
+const MINED_NEAR: f64 = 6.0;
 /// Baritone's `SURFACE_AT_AIR`: below this much air under water, swim up.
 const SURFACE_AT_AIR: i32 = 100;
 /// Vanilla's full air supply.
@@ -52,6 +53,12 @@ const EXPLORE_LEGS: u32 = 60;
 const EXPLORE_SCAN_TICKS: u64 = 20;
 /// Close enough to an exploring waypoint to head for the next.
 const WAYPOINT_REACHED: f64 = 6.0;
+/// How far around the player to look for lower ground before exploring.
+const DESCENT_RADIUS: i32 = 24;
+/// How far below the feet counts as lower ground worth dropping to.
+const DESCENT_MIN_DEPTH: i32 = 8;
+/// How far down to look for the ground in a column.
+const DESCENT_MAX_DEPTH: i32 = 96;
 
 /// An entity the game sees, for following.
 #[derive(Clone, Debug, PartialEq)]
@@ -85,19 +92,27 @@ struct Explore {
     origin: BlockPos,
     leg: u32,
     next_scan: u64,
+    /// The level to drop to first when the search ran dry up on an island or
+    /// a cliff: the ground below is nearer than any waypoint.
+    descend_to: Option<i32>,
 }
 
 #[derive(Clone, Debug, Default)]
 struct Mine {
+    /// `blocks` and `blacklist` (Baritone's inaccessible ones); `target` is
+    /// the block mined from right below (the shaft), for drawing.
     search: Search,
     count: Option<u32>,
     mined: u32,
-    /// Where blocks were mined, newest last, to find their drops.
-    mined_at: Vec<BlockPos>,
-    /// The item entity being picked up, and ticks spent on top of it.
-    item: Option<(i32, u32)>,
-    item_blacklist: HashSet<i32>,
-    /// The count is reached; only drops are left to pick up.
+    /// Baritone's `knownOreLocations`: the nearest wanted blocks and drops,
+    /// up to [`MINE_MAX_ORE_LOCATIONS`], nearest first.
+    known: Vec<BlockPos>,
+    /// Baritone's `anticipatedDrops`: where a block was just mined, with the
+    /// tick until which its drop is waited for.
+    anticipated_drops: HashMap<BlockPos, u64>,
+    /// Baritone's `tickCount`, for the rescan interval.
+    tick_count: u64,
+    /// The count is reached; only its drops are left to pick up.
     done: bool,
 }
 
@@ -141,6 +156,8 @@ enum Drive {
 /// basso's state in one game.
 #[derive(Debug, Default)]
 pub struct Bot {
+    /// `basso click`: the mouse buttons send the bot where the view points.
+    click_mode: bool,
     order: Option<Order>,
     paused: bool,
     exec: Option<Executor>,
@@ -151,10 +168,15 @@ pub struct Bot {
     /// The goal `exec` was planned for.
     goal: Option<Goal>,
     allow_mining: bool,
+    /// The player has blocks to place (from the last tick).
+    has_blocks: bool,
     failures: u32,
+    /// When the search in `pending` began, for the verbose log.
+    search_began: u64,
     retry_at: u64,
     /// Going up for air, until it is full again.
     surfacing: bool,
+    mlg: Mlg,
     /// The search for the path after the current partial one, run while
     /// walking it (Baritone's plan ahead), and its result.
     ahead: Option<AStar>,
@@ -168,6 +190,10 @@ pub struct Bot {
 impl Bot {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn click_mode(&self) -> bool {
+        self.click_mode
     }
 
     pub fn is_active(&self) -> bool {
@@ -229,6 +255,15 @@ impl Bot {
             Err(err) => return vec![err],
         };
         match command {
+            Command::Click => {
+                self.click_mode = !self.click_mode;
+                vec![if self.click_mode {
+                    "Click on: left click goes into the block you point at, right click onto it. `basso click` again to leave."
+                } else {
+                    "Click off."
+                }
+                .to_owned()]
+            }
             Command::Hint => vec![commands::HINT.to_owned()],
             Command::Help(command) => commands::help(command.as_deref()),
             Command::Set { name, value } => self.settings.set(name.as_deref(), value.as_deref()),
@@ -315,6 +350,20 @@ impl Bot {
         }
     }
 
+    /// Baritone's `#click`: go to the block clicked, as `goto` would.
+    pub fn click_goto(&mut self, goal: Goal) -> String {
+        let line = format!("Going to {goal}.");
+        self.start(Order::Goto(goal));
+        line
+    }
+
+    /// Say `line` when `verbose` is at least `level`.
+    fn say(&mut self, level: u8, line: impl FnOnce() -> String) {
+        if self.settings.verbose >= level {
+            self.messages.push(format!("[v{level}] {}", line()));
+        }
+    }
+
     fn start(&mut self, order: Order) {
         self.stop();
         self.order = Some(order);
@@ -348,8 +397,13 @@ impl Bot {
         entities: &[EntityInfo],
     ) -> Option<Controls> {
         self.ticks += 1;
+        self.has_blocks = player.has_blocks;
         if self.paused {
             return None;
+        }
+        let order_going = self.order.is_some();
+        if let Some(controls) = self.mlg.tick(world, player, self.settings.mlg_water_bucket && order_going) {
+            return Some(controls);
         }
         let controls = match self.order.take()? {
             Order::Goto(goal) => self.tick_goto(goal, world, player),
@@ -438,6 +492,7 @@ impl Bot {
         Some(controls)
     }
 
+    /// Baritone's `MineProcess.onTick`.
     fn tick_mine(
         &mut self,
         mut mine: Box<Mine>,
@@ -446,136 +501,175 @@ impl Bot {
         entities: &[EntityInfo],
     ) -> Option<Controls> {
         let names = describe(&mine.search.blocks);
-        if let Some(t) = mine.search.target
-            && world.is_block(t, &mine.search.blocks) == Some(false)
-        {
+        let feet = player.node();
+        mine.anticipated_drops.retain(|_, until| *until >= self.ticks);
+
+        // known blocks by the player that are gone: basso broke them
+        let blocks = mine.search.blocks.clone();
+        let mined: Vec<BlockPos> = mine
+            .known
+            .iter()
+            .copied()
+            .filter(|&p| {
+                p.center().distance_squared(player.eye()) <= MINED_NEAR * MINED_NEAR
+                    && world.is_block(p, &blocks) == Some(false)
+                    && !mine.anticipated_drops.contains_key(&p)
+            })
+            .collect();
+        for p in mined {
             mine.mined += 1;
-            mine.mined_at.push(t);
-            if mine.mined_at.len() > MINED_MEMORY {
-                mine.mined_at.remove(0);
-            }
-            mine.search.target = None;
-            self.reset_search();
+            mine.anticipated_drops.insert(p, self.ticks + MINE_DROP_LOITER_TICKS);
             if mine.count.is_some_and(|count| mine.mined >= count) {
                 mine.done = true;
             }
         }
+        mine.known.retain(|p| !mine.anticipated_drops.contains_key(p));
 
-        // drops first, but don't walk off a block being broken
-        let breaking = mine.search.target.is_some_and(|t| can_reach(world, player, t));
-        if self.settings.mine_scan_dropped_items
-            && !breaking
-            && let Some(controls) = self.collect_drops(&mut mine, world, player, entities)
-        {
-            self.order = Some(Order::Mine(mine));
-            return Some(controls);
-        }
-        if mine.done {
+        let dropped = self.dropped_items_scan(&mine, entities);
+        if mine.done && dropped.is_empty() {
             self.finish(format!("Mined {} {names}.", mine.mined));
             return None;
         }
 
-        let t = match self.find(&mut mine.search, world, player) {
-            Found::Block(t) => t,
-            Found::Exploring(controls) => {
-                self.order = Some(Order::Mine(mine));
-                return Some(controls);
+        // rescan
+        if mine.tick_count.is_multiple_of(MINE_GOAL_UPDATE_INTERVAL) {
+            let mut locs = if mine.done {
+                Vec::new()
+            } else {
+                find_known(world, feet, &blocks, &mine.search.blacklist, MINE_MAX_ORE_LOCATIONS)
+            };
+            if !mine.done {
+                locs.extend(mine.known.iter().copied());
             }
-            Found::Nothing { explored: false } => {
-                self.finish(format!("No more {names} nearby. Mined {}.", mine.mined));
-                return None;
-            }
-            Found::Nothing { explored: true } => {
-                self.finish(format!("Explored without finding more {names}. Mined {}.", mine.mined));
-                return None;
-            }
-        };
+            mine.known = locs;
+        }
+        mine.tick_count += 1;
 
-        let mut controls = None;
-        let breakable = CachedWorld::new(world, true)
-            .cost_for_breaking_block(t)
-            .is_finite();
-        if !breakable {
-            // next to a fluid or unbreakable: leave it
-            mine.search.give_up(t);
-            self.reset_search();
-        } else if can_reach(world, player, t) {
-            self.exec = None;
-            self.goal = None;
-            controls = Some(Controls {
-                look: Some(yaw_pitch(player.eye(), t.center())),
-                mine: Some(t),
-                ..Controls::default()
-            });
-        } else {
-            match self.drive(Goal::TwoBlocks(t), true, world, player) {
-                Drive::Controls(c) => controls = Some(c),
-                Drive::Failed => {
-                    mine.search.give_up(t);
-                    self.reset_search();
-                }
+        // the shaft: a wanted block straight above, mined from below
+        mine.search.target = None;
+        if player.on_ground && !mine.done {
+            let shaft = mine
+                .known
+                .iter()
+                .copied()
+                .filter(|p| p.x == feet.x && p.z == feet.z && p.y >= feet.y)
+                .filter(|&p| world.is_block(p, &blocks) == Some(true))
+                .min_by_key(|p| p.distance_squared(feet.up(1)));
+            if let Some(t) = shaft
+                && plausible_to_break(world, t)
+                && can_reach(world, player, t)
+            {
+                mine.search.target = Some(t);
+                self.exec = None;
+                self.goal = None;
+                self.order = Some(Order::Mine(mine));
+                return Some(Controls {
+                    look: Some(yaw_pitch(player.eye(), t.center())),
+                    mine: Some(t),
+                    ..Controls::default()
+                });
             }
         }
-        self.order = Some(Order::Mine(mine));
-        Some(controls.unwrap_or_default())
-    }
 
-    /// Baritone's `mineScanDroppedItems`: walk onto the nearest item that is
-    /// a wanted block or lies by a block basso mined. `None` when there is
-    /// none to pick up.
-    fn collect_drops(
-        &mut self,
-        mine: &mut Mine,
-        world: &dyn BlockView,
-        player: &PlayerState,
-        entities: &[EntityInfo],
-    ) -> Option<Controls> {
-        let wanted = |e: &&EntityInfo| is_drop(mine, player, e);
-        let current = mine
-            .item
-            .and_then(|(id, _)| entities.iter().find(|e| e.id == id))
-            .filter(wanted);
-        let item = current
-            .or_else(|| {
-                entities.iter().filter(wanted).min_by(|a, b| {
-                    let da = a.pos.distance_squared(player.pos);
-                    let db = b.pos.distance_squared(player.pos);
-                    da.total_cmp(&db)
-                })
-            })
-            .cloned();
-        let Some(item) = item else {
-            mine.item = None;
-            return None;
-        };
-        let waited = match mine.item {
-            Some((id, waited)) if id == item.id => waited,
-            _ => 0,
-        };
-        let goal = Goal::Block(BlockPos::of_feet(item.pos));
-        let on_it = player.pos.horizontal_distance(item.pos) < 0.8 && (player.pos.y - item.pos.y).abs() < 1.5;
-        if on_it || goal.success(player.node()) {
-            // standing on it: wait out its pickup delay, then leave it
-            self.exec = None;
-            self.goal = None;
-            if waited >= ITEM_PATIENCE {
-                mine.item_blacklist.insert(item.id);
-                mine.item = None;
-            } else {
-                mine.item = Some((item.id, waited + 1));
+        // updateGoal: the drops lying about are goals too
+        let mut wanted = mine.known.clone();
+        wanted.extend(dropped.iter().copied().filter(|d| !mine.known.contains(d)));
+        let goals = prune(world, player, &wanted, &blocks, &mine.search.blacklist, &dropped);
+        // only blocks are kept between ticks; drops are scanned again
+        mine.known = goals
+            .iter()
+            .copied()
+            .filter(|&p| world.is_block(p, &blocks) != Some(false))
+            .collect();
+        if goals.is_empty() {
+            if mine.done {
+                self.finish(format!("Mined {} {names}.", mine.mined));
+                return None;
             }
+            return match self.find(&mut mine.search, world, player) {
+                Found::Block(t) => {
+                    mine.search.target = None;
+                    if plausible_to_break(world, t) {
+                        mine.known.push(t);
+                    } else {
+                        // next to a fluid or unbreakable: leave it
+                        self.say(1, || format!("Skipping {names} at {t}: next to a fluid or unbreakable."));
+                        mine.search.blacklist.insert(t);
+                    }
+                    self.order = Some(Order::Mine(mine));
+                    Some(Controls::default())
+                }
+                Found::Exploring(controls) => {
+                    self.order = Some(Order::Mine(mine));
+                    Some(controls)
+                }
+                Found::Nothing { explored: false } => {
+                    self.finish(format!("No more {names} nearby. Mined {}.", mine.mined));
+                    None
+                }
+                Found::Nothing { explored: true } => {
+                    self.finish(format!("Explored without finding more {names}. Mined {}.", mine.mined));
+                    None
+                }
+            };
+        }
+        mine.search.explore = None;
+        if mine.tick_count % 40 == 1 {
+            let nearest = goals.iter().copied().min_by_key(|p| p.distance_squared(feet));
+            self.say(2, || format!("Mining goals: {} blocks, nearest {nearest:?}, standing at {feet}.", goals.len()));
+        }
+        let goal = Goal::Composite(
+            goals
+                .iter()
+                .map(|&loc| coalesce(world, loc, &goals, &blocks))
+                .collect(),
+        );
+        if goal.success(feet) {
+            // standing on a drop, waiting for it to be picked up
+            self.exec = None;
+            self.goal = Some(goal);
+            self.order = Some(Order::Mine(mine));
             return Some(Controls::default());
         }
-        mine.item = Some((item.id, waited));
-        match self.drive(goal, true, world, player) {
-            Drive::Controls(controls) => Some(controls),
+        let controls = match self.drive(goal, true, world, player) {
+            Drive::Controls(controls) => controls,
             Drive::Failed => {
-                mine.item_blacklist.insert(item.id);
-                mine.item = None;
+                // blacklistClosestOnFailure
+                let closest = mine
+                    .known
+                    .iter()
+                    .copied()
+                    .min_by_key(|p| p.distance_squared(feet));
+                if let Some(closest) = closest {
+                    self.say(1, || format!("Giving up on {names} at {closest}: no path."));
+                    mine.search.blacklist.insert(closest);
+                    mine.known.retain(|&p| p != closest);
+                }
                 self.reset_search();
-                Some(Controls::default())
+                Controls::default()
             }
+        };
+        self.order = Some(Order::Mine(mine));
+        Some(controls)
+    }
+
+    /// Baritone's `droppedItemsScan`: where the wanted items lie, and the
+    /// drops still expected from blocks just mined.
+    fn dropped_items_scan(&self, mine: &Mine, entities: &[EntityInfo]) -> Vec<BlockPos> {
+        if !self.settings.mine_scan_dropped_items {
+            return Vec::new();
         }
+        let mut dropped: Vec<BlockPos> = entities
+            .iter()
+            .filter(|e| {
+                e.item
+                    .as_ref()
+                    .is_some_and(|item| mine.search.blocks.iter().any(|b| crate::block_id_matches(b, item)))
+            })
+            .map(|e| BlockPos::of_feet(e.pos))
+            .collect();
+        dropped.extend(mine.anticipated_drops.keys().copied());
+        dropped
     }
 
     /// The search's block, or a walk about while none is loaded.
@@ -608,10 +702,25 @@ impl Bot {
                 origin: player.node(),
                 leg: 0,
                 next_scan: 0,
+                descend_to: descent_level(world, player.node()),
             }
         });
         if scan {
             explore.next_scan = self.ticks + EXPLORE_SCAN_TICKS;
+        }
+        if let Some(level) = explore.descend_to {
+            if player.node().y <= level + 1 {
+                explore.descend_to = None;
+            } else {
+                match self.drive(Goal::Y(level), true, world, player) {
+                    Drive::Controls(controls) => return Found::Exploring(controls),
+                    Drive::Failed => {
+                        explore.descend_to = None;
+                        self.reset_search();
+                        return Found::Exploring(Controls::default());
+                    }
+                }
+            }
         }
         loop {
             if explore.leg >= EXPLORE_LEGS {
@@ -706,6 +815,18 @@ impl Bot {
 
     /// Search on from where the current partial path ends while it is
     /// walked, a slice a tick, so there is no stop between the two.
+    /// The world the searches see: what the settings and the player's
+    /// pockets allow.
+    fn cached<'a>(
+        settings: &Settings,
+        has_blocks: bool,
+        world: &'a dyn BlockView,
+        allow_mining: bool,
+    ) -> CachedWorld<'a> {
+        CachedWorld::new(world, allow_mining && settings.allow_break)
+            .with_moves(settings.allow_parkour, settings.allow_place && has_blocks)
+    }
+
     fn plan_ahead(&mut self, end: BlockPos, goal: &Goal, allow_mining: bool, world: &dyn BlockView) {
         if self.next.is_some() {
             return;
@@ -713,7 +834,7 @@ impl Bot {
         let search = self
             .ahead
             .get_or_insert_with(|| AStar::new(end, goal.clone(), self.budget));
-        let Some(path) = search.run(&CachedWorld::new(world, allow_mining), SEARCH_SLICE) else {
+        let Some(path) = search.run(&Self::cached(&self.settings, self.has_blocks, world, allow_mining), SEARCH_SLICE) else {
             return;
         };
         self.ahead = None;
@@ -759,16 +880,33 @@ impl Bot {
                     return Drive::Controls(Controls::default());
                 }
                 self.pending = Some(AStar::new(player.node(), goal.clone(), self.budget));
+                self.search_began = self.ticks;
+                let (from, to) = (player.node(), goal.clone());
+                self.say(2, || format!("Searching from {from} to {to} (mining {allow_mining})."));
             }
             let search = self.pending.as_mut().expect("started above");
-            let cached = CachedWorld::new(world, allow_mining);
+            let cached = Self::cached(&self.settings, self.has_blocks, world, allow_mining);
             let Some(path) = search.run(&cached, SEARCH_SLICE) else {
                 // not done: stand still and go on next tick
+                let nodes = search.nodes_considered();
+                self.say(3, || format!("Search slice done, {nodes} nodes so far."));
                 return Drive::Controls(Controls::default());
             };
             let start = search.start();
+            let nodes = search.nodes_considered();
+            let took = self.ticks - self.search_began;
             self.pending = None;
+            self.say(1, || {
+                format!(
+                    "Search over after {took} ticks, {nodes} nodes: {} steps, cost {:.0}{}.",
+                    path.steps.len(),
+                    path.cost,
+                    if path.is_partial { ", partial" } else { "" }
+                )
+            });
             if path.steps.is_empty() {
+                let failure = self.failures + 1;
+                self.say(1, || format!("No path from {start}: failure {failure} of {MAX_FAILURES}."));
                 self.failures += 1;
                 if self.failures >= MAX_FAILURES {
                     return Drive::Failed;
@@ -784,8 +922,9 @@ impl Bot {
         match progress {
             Progress::Moving => {
                 if self.ticks.is_multiple_of(VALIDATE_INTERVAL)
-                    && !exec.is_still_valid(&CachedWorld::new(world, allow_mining), 5)
+                    && !exec.is_still_valid(&Self::cached(&self.settings, self.has_blocks, world, allow_mining), 5)
                 {
+                    self.say(2, || "The path is no longer valid, planning again.".to_owned());
                     self.exec = None;
                     self.ahead = None;
                     self.next = None;
@@ -838,19 +977,119 @@ fn describe(blocks: &[String]) -> String {
         .join(", ")
 }
 
-/// An item worth picking up while mining: one of the mined blocks, or lying
-/// by a block basso mined, and not given up on.
-fn is_drop(mine: &Mine, player: &PlayerState, e: &EntityInfo) -> bool {
-    let Some(item) = &e.item else {
-        return false;
-    };
-    !mine.item_blacklist.contains(&e.id)
-        && e.pos.distance_squared(player.pos) <= ITEM_RANGE * ITEM_RANGE
-        && (mine.search.blocks.iter().any(|b| crate::block_id_matches(b, item))
-            || mine
-                .mined_at
-                .iter()
-                .any(|m| m.center().distance_squared(e.pos) <= DROP_RADIUS * DROP_RADIUS))
+/// Baritone's `MineProcess.prune`: drops not next to a wanted block, then
+/// the wanted blocks still there (or out of sight), breakable and not given
+/// up on, nearest first, at most [`MINE_MAX_ORE_LOCATIONS`].
+fn prune(
+    world: &dyn BlockView,
+    player: &PlayerState,
+    locs: &[BlockPos],
+    blocks: &[String],
+    blacklist: &HashSet<BlockPos>,
+    dropped: &[BlockPos],
+) -> Vec<BlockPos> {
+    let wanted = |p: BlockPos| world.is_block(p, blocks) == Some(true) && plausible_to_break(world, p);
+    let dropped: Vec<BlockPos> = dropped
+        .iter()
+        .copied()
+        .filter(|&drop| !locs.iter().any(|&p| p.distance_squared(drop) <= 9 && wanted(p)))
+        .collect();
+    let mut out: Vec<BlockPos> = Vec::new();
+    for &p in locs {
+        if out.contains(&p) {
+            continue;
+        }
+        let there = match world.is_block(p, blocks) {
+            None => true,
+            Some(is) => is || dropped.contains(&p),
+        };
+        if there && plausible_to_break(world, p) && p.y >= world.min_y() && !blacklist.contains(&p) {
+            out.push(p);
+        }
+    }
+    let feet = player.node();
+    out.sort_by_key(|p| p.distance_squared(feet));
+    out.truncate(MINE_MAX_ORE_LOCATIONS);
+    out
+}
+
+/// Baritone's `plausibleToBreak`: it can be broken at all (not bedrock, not
+/// by a fluid).
+fn plausible_to_break(world: &dyn BlockView, pos: BlockPos) -> bool {
+    CachedWorld::new(world, true).cost_for_breaking_block(pos).is_finite()
+}
+
+/// Baritone's `internalMiningGoal`, with `internalMiningAirException`.
+fn internal_mining_goal(world: &dyn BlockView, pos: BlockPos, locs: &[BlockPos], blocks: &[String]) -> bool {
+    if locs.contains(&pos) {
+        return true;
+    }
+    if world.cell(pos).is_some_and(|c| c.passable && !c.liquid) {
+        return true;
+    }
+    world.is_block(pos, blocks) == Some(true) && plausible_to_break(world, pos)
+}
+
+/// Baritone's `MineProcess.coalesce` with `forceInternalMining`: the goal
+/// that puts the feet or head into `loc`, making the most of wanted blocks
+/// next to it.
+fn coalesce(world: &dyn BlockView, loc: BlockPos, locs: &[BlockPos], blocks: &[String]) -> Goal {
+    let assume_vertical_shaft_mine = !world.cell(loc.up(1)).is_some_and(|c| c.falling);
+    let upward = internal_mining_goal(world, loc.up(1), locs, blocks);
+    let downward = internal_mining_goal(world, loc.down(1), locs, blocks);
+    let double_downward = internal_mining_goal(world, loc.down(2), locs, blocks);
+    if upward == downward {
+        if double_downward && assume_vertical_shaft_mine {
+            Goal::ThreeBlocks(loc)
+        } else {
+            Goal::TwoBlocks(loc)
+        }
+    } else if upward {
+        Goal::Block(loc)
+    } else if double_downward && assume_vertical_shaft_mine {
+        Goal::TwoBlocks(loc.down(1))
+    } else {
+        Goal::Block(loc.down(1))
+    }
+}
+
+/// Where to stand on the nearest ground (or water) at least
+/// [`DESCENT_MIN_DEPTH`] below `feet`, looking around it. A bot up on a sky
+/// island has nothing to search up there: dropping to the ground beats
+/// bridging away across the void.
+fn descent_level(world: &dyn BlockView, feet: BlockPos) -> Option<i32> {
+    let mut best: Option<(i32, i32)> = None;
+    for dx in -DESCENT_RADIUS..=DESCENT_RADIUS {
+        for dz in -DESCENT_RADIUS..=DESCENT_RADIUS {
+            let dist = dx * dx + dz * dz;
+            if best.is_some_and(|(d, _)| d <= dist) {
+                continue;
+            }
+            let mut y = feet.y - 1;
+            let floor = feet.y - DESCENT_MAX_DEPTH;
+            while y >= floor.max(world.min_y()) {
+                let Some(cell) = world.cell(BlockPos::new(feet.x + dx, y, feet.z + dz)) else {
+                    break;
+                };
+                if cell.liquid && !cell.water {
+                    break; // lava
+                }
+                let level = if cell.water {
+                    y
+                } else if cell.solid || cell.standable {
+                    y + 1
+                } else {
+                    y -= 1;
+                    continue;
+                };
+                if feet.y - level >= DESCENT_MIN_DEPTH {
+                    best = Some((dist, level));
+                }
+                break;
+            }
+        }
+    }
+    best.map(|(_, level)| level)
 }
 
 /// The `leg`th waypoint of a square spiral around `origin`, one
@@ -897,13 +1136,27 @@ pub fn find_nearest(
     blocks: &[String],
     blacklist: &HashSet<BlockPos>,
 ) -> Option<BlockPos> {
-    let mut best: Option<(i64, BlockPos)> = None;
+    find_known(world, from, blocks, blacklist, 1).first().copied()
+}
+
+/// The `max` nearest blocks matching `blocks` within [`SEARCH_RADIUS`],
+/// nearest first, searched in growing cubes until no nearer one can be left.
+pub fn find_known(
+    world: &dyn BlockView,
+    from: BlockPos,
+    blocks: &[String],
+    blacklist: &HashSet<BlockPos>,
+    max: usize,
+) -> Vec<BlockPos> {
+    let mut found: Vec<(i64, BlockPos)> = Vec::new();
     for r in 0..=SEARCH_RADIUS {
-        // nothing further out can beat what was found
-        if let Some((d, _)) = best
-            && i64::from(r) * i64::from(r) > d
-        {
-            break;
+        // nothing further out can beat the farthest of a full list
+        if found.len() >= max {
+            found.sort_unstable_by_key(|&(d, p)| (d, p.x, p.y, p.z));
+            found.truncate(max);
+            if i64::from(r) * i64::from(r) > found[max - 1].0 {
+                break;
+            }
         }
         for dx in -r..=r {
             for dy in -r..=r {
@@ -915,10 +1168,7 @@ pub fn find_nearest(
                         && !blacklist.contains(&pos)
                         && world.is_block(pos, blocks) == Some(true)
                     {
-                        let d = pos.distance_squared(from);
-                        if best.is_none_or(|(bd, _)| d < bd) {
-                            best = Some((d, pos));
-                        }
+                        found.push((pos.distance_squared(from), pos));
                     }
                     // inside the cube only the two z faces are new
                     dz += if on_face || dz == r { 1 } else { 2 * r };
@@ -926,7 +1176,9 @@ pub fn find_nearest(
             }
         }
     }
-    best.map(|(_, pos)| pos)
+    found.sort_unstable_by_key(|&(d, p)| (d, p.x, p.y, p.z));
+    found.truncate(max);
+    found.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Whether the player can break `block` from where they stand: in reach and
@@ -1216,27 +1468,81 @@ mod tests {
         assert_eq!(bot.take_messages(), ["No crafting_table nearby."]);
     }
 
+    /// Ticks until the bot orders a block mined, `None` if it never does.
+    fn until_mining(
+        bot: &mut Bot,
+        world: &TestWorld,
+        player: &PlayerState,
+        entities: &[EntityInfo],
+    ) -> Option<Controls> {
+        (0..40)
+            .filter_map(|_| bot.tick(world, player, entities))
+            .find(|c| c.mine.is_some())
+    }
+
+    /// Ticks until the order is over.
+    fn until_done(bot: &mut Bot, world: &TestWorld, player: &PlayerState, entities: &[EntityInfo]) {
+        for _ in 0..30 {
+            if bot.tick(world, player, entities).is_none() {
+                return;
+            }
+        }
+        panic!("still going: {:?}", bot.goal());
+    }
+
     #[test]
     fn mines_a_block_in_reach_and_counts_it() {
         let mut world = TestWorld::flat(10);
         world.set(BlockPos::new(2, 64, 0), Cell::solid(45.0), "coal_ore");
-        world.set(BlockPos::new(-2, 64, 0), Cell::solid(45.0), "coal_ore");
         let mut bot = Bot::new();
-        let player = standing(0.5, 64.0, 0.5);
-        assert_eq!(bot.command("basso mine 2 coal_ore", &world, &player), ["Mining 2 coal_ore."]);
-        let controls = bot.tick(&world, &player, &[]).unwrap();
-        let first = controls.mine.unwrap();
-        assert!(first == BlockPos::new(2, 64, 0) || first == BlockPos::new(-2, 64, 0));
+        bot.settings.mine_scan_dropped_items = false;
+        let player = standing(1.5, 64.0, 0.5);
+        assert_eq!(bot.command("basso mine 1 coal_ore", &world, &player), ["Mining 1 coal_ore."]);
+        let controls = until_mining(&mut bot, &world, &player, &[]).expect("mines it");
+        assert_eq!(controls.mine, Some(BlockPos::new(2, 64, 0)));
         assert!(!controls.forward);
-
-        world.air(first);
-        let second = bot.tick(&world, &player, &[]).unwrap().mine.unwrap();
-        assert_ne!(first, second);
         // no chat line per block
         assert!(bot.take_messages().is_empty());
+        world.air(BlockPos::new(2, 64, 0));
+        until_done(&mut bot, &world, &player, &[]);
+        assert_eq!(bot.take_messages(), ["Mined 1 coal_ore."]);
+    }
+
+    #[test]
+    fn mines_every_known_block_in_turn() {
+        let mut world = TestWorld::flat(10);
+        for x in [2, 3] {
+            world.set(BlockPos::new(x, 64, 0), Cell::solid(45.0), "coal_ore");
+        }
+        let mut bot = Bot::new();
+        bot.settings.mine_scan_dropped_items = false;
+        let player = standing(1.5, 64.0, 0.5);
+        bot.command("basso mine 2 coal_ore", &world, &player);
+        let first = until_mining(&mut bot, &world, &player, &[]).unwrap().mine.unwrap();
+        assert_eq!(first, BlockPos::new(2, 64, 0));
+        world.air(first);
+        let player = standing(2.5, 64.0, 0.5);
+        let second = until_mining(&mut bot, &world, &player, &[]).unwrap().mine.unwrap();
+        assert_eq!(second, BlockPos::new(3, 64, 0));
         world.air(second);
-        assert_eq!(bot.tick(&world, &player, &[]), None);
+        until_done(&mut bot, &world, &player, &[]);
         assert_eq!(bot.take_messages(), ["Mined 2 coal_ore."]);
+    }
+
+    #[test]
+    fn every_known_block_is_in_the_goal() {
+        let mut world = TestWorld::flat(15);
+        for x in [8, -9, 5] {
+            world.set(BlockPos::new(x, 64, 0), Cell::solid(45.0), "coal_ore");
+        }
+        let mut bot = Bot::new();
+        let player = standing(0.5, 64.0, 0.5);
+        bot.command("basso mine coal_ore", &world, &player);
+        bot.tick(&world, &player, &[]);
+        let Some(Goal::Composite(goals)) = bot.goal() else {
+            panic!("{:?}", bot.goal());
+        };
+        assert_eq!(goals.len(), 3);
     }
 
     #[test]
@@ -1246,10 +1552,16 @@ mod tests {
         let mut bot = Bot::new();
         let player = standing(0.5, 64.0, 0.5);
         bot.command("basso mine coal_ore", &world, &player);
-        let controls = bot.tick(&world, &player, &[]).unwrap();
-        assert!(controls.forward);
+        let controls = (0..30)
+            .filter_map(|_| bot.tick(&world, &player, &[]))
+            .find(|c| c.forward)
+            .expect("walks");
         assert_eq!(controls.mine, None);
-        assert_eq!(bot.goal(), Some(&Goal::TwoBlocks(BlockPos::new(10, 64, 0))));
+        // the goal is the ore itself, as Baritone's: the path breaks into it
+        assert_eq!(
+            bot.goal(),
+            Some(&Goal::Composite(vec![Goal::Block(BlockPos::new(10, 64, 0))]))
+        );
     }
 
     #[test]
@@ -1261,8 +1573,7 @@ mod tests {
         bot.settings.explore_for_blocks = false;
         let player = standing(0.5, 64.0, 0.5);
         bot.command("basso mine coal_ore", &world, &player);
-        bot.tick(&world, &player, &[]);
-        assert_eq!(bot.tick(&world, &player, &[]), None);
+        until_done(&mut bot, &world, &player, &[]);
         assert_eq!(bot.take_messages(), ["No more coal_ore nearby. Mined 0."]);
     }
 
@@ -1360,11 +1671,13 @@ mod tests {
         inner.set(BlockPos::new(2, 64, 0), Cell::solid(60.0), "birch_log");
         let world = Knows(inner, &["stone", "oak_log", "birch_log"]);
         let mut bot = Bot::new();
-        let player = standing(0.5, 64.0, 0.5);
+        let player = standing(1.5, 64.0, 0.5);
         assert_eq!(bot.command("basso mine log", &world, &player), ["Mining all log."]);
-        let controls = bot.tick(&world, &player, &[]).unwrap();
+        let controls = (0..40)
+            .filter_map(|_| bot.tick(&world, &player, &[]))
+            .find(|c| c.mine.is_some())
+            .expect("mines the birch log");
         assert_eq!(controls.mine, Some(BlockPos::new(2, 64, 0)));
-        assert_eq!(bot.target_block(), Some(BlockPos::new(2, 64, 0)));
         assert_eq!(bot.command("basso goto log", &world, &player), ["Going to the nearest log."]);
         assert_eq!(bot.command("basso mine nope", &world, &player), ["Unknown block `nope`."]);
     }
@@ -1382,27 +1695,48 @@ mod tests {
     }
 
     #[test]
-    fn picks_up_drops_before_finishing() {
+    fn waits_for_the_drop_of_a_mined_block() {
         let mut world = TestWorld::flat(10);
         world.set(BlockPos::new(2, 64, 0), Cell::solid(45.0), "coal_ore");
         let mut bot = Bot::new();
-        let player = standing(0.5, 64.0, 0.5);
+        let player = standing(1.5, 64.0, 0.5);
         bot.command("basso mine 1 coal_ore", &world, &player);
-        assert!(bot.tick(&world, &player, &[]).unwrap().mine.is_some());
+        until_mining(&mut bot, &world, &player, &[]).expect("mines it");
         world.air(BlockPos::new(2, 64, 0));
-        // coal, not coal_ore, lies where the ore was: still its drop
-        let drop = [item(9, "coal", 4.5, 0.5)];
-        let controls = bot.tick(&world, &player, &drop).unwrap();
+        // the ore's drop is expected where it was: go there and wait
+        let controls = bot.tick(&world, &player, &[]).unwrap();
         assert!(controls.forward);
-        assert_eq!(bot.goal(), Some(&Goal::Block(BlockPos::new(4, 64, 0))));
         assert!(bot.is_active());
-        // standing on it: wait for the pickup
-        let there = standing(4.5, 64.0, 0.5);
-        assert!(!bot.tick(&world, &there, &drop).unwrap().forward);
+        let there = standing(2.5, 64.0, 0.5);
+        assert!(!bot.tick(&world, &there, &[]).unwrap().forward);
         assert!(bot.is_active());
-        // picked up: done
-        assert_eq!(bot.tick(&world, &there, &[]), None);
+        // the wait is over after a few ticks
+        until_done(&mut bot, &world, &there, &[]);
         assert_eq!(bot.take_messages(), ["Mined 1 coal_ore."]);
+    }
+
+    #[test]
+    fn picks_up_a_matching_item_before_finishing() {
+        let mut world = TestWorld::flat(10);
+        world.set(BlockPos::new(2, 64, 0), Cell::solid(60.0), "oak_log");
+        let mut bot = Bot::new();
+        let player = standing(1.5, 64.0, 0.5);
+        bot.command("basso mine 1 oak_log", &world, &player);
+        until_mining(&mut bot, &world, &player, &[]).expect("mines it");
+        world.air(BlockPos::new(2, 64, 0));
+        let drop = [item(9, "oak_log", 6.5, 0.5)];
+        for _ in 0..20 {
+            assert!(bot.tick(&world, &player, &drop).is_some());
+        }
+        let Some(Goal::Composite(goals)) = bot.goal() else {
+            panic!("{:?}", bot.goal());
+        };
+        assert!(goals.iter().any(|g| matches!(g, Goal::Block(p) if *p == BlockPos::new(6, 64, 0)
+            || matches!(g, Goal::TwoBlocks(p) | Goal::ThreeBlocks(p) if *p == BlockPos::new(6, 64, 0)))));
+        // picked up: done
+        let there = standing(6.5, 64.0, 0.5);
+        until_done(&mut bot, &world, &there, &[]);
+        assert_eq!(bot.take_messages(), ["Mined 1 oak_log."]);
     }
 
     #[test]
@@ -1410,19 +1744,20 @@ mod tests {
         let mut world = TestWorld::flat(10);
         world.set(BlockPos::new(2, 64, 0), Cell::solid(45.0), "coal_ore");
         let mut bot = Bot::new();
-        let player = standing(0.5, 64.0, 0.5);
+        let player = standing(1.5, 64.0, 0.5);
         bot.command("basso mine 1 coal_ore", &world, &player);
-        bot.tick(&world, &player, &[]);
+        until_mining(&mut bot, &world, &player, &[]).unwrap();
         world.air(BlockPos::new(2, 64, 0));
-        // far from the mined block and not what is mined
-        assert_eq!(bot.tick(&world, &player, &[item(3, "dirt", -8.5, 0.5)]), None);
+        // a dirt item far off is not wanted: only the ore's own drop is waited for
+        let dirt = [item(3, "dirt", -8.5, 0.5)];
+        until_done(&mut bot, &world, &player, &dirt);
 
         let mut world = TestWorld::flat(10);
         world.set(BlockPos::new(2, 64, 0), Cell::solid(45.0), "coal_ore");
         let mut bot = Bot::new();
         bot.settings.mine_scan_dropped_items = false;
         bot.command("basso mine 1 coal_ore", &world, &player);
-        bot.tick(&world, &player, &[]);
+        until_mining(&mut bot, &world, &player, &[]).unwrap();
         world.air(BlockPos::new(2, 64, 0));
         assert_eq!(bot.tick(&world, &player, &[item(9, "coal", 2.5, 0.5)]), None);
     }
@@ -1436,25 +1771,12 @@ mod tests {
         bot.command("basso mine oak_log", &world, &player);
         let logs = [item(4, "oak_log", 10.5, 0.5)];
         bot.tick(&world, &player, &logs);
-        assert_eq!(bot.goal(), Some(&Goal::Block(BlockPos::new(10, 64, 0))));
+        let Some(Goal::Composite(goals)) = bot.goal() else {
+            panic!("{:?}", bot.goal());
+        };
+        assert!(goals.contains(&Goal::Block(BlockPos::new(10, 64, 0))));
     }
 
-    #[test]
-    fn gives_up_on_an_item_it_cannot_pick_up() {
-        let mut world = TestWorld::flat(10);
-        world.set(BlockPos::new(2, 64, 0), Cell::solid(45.0), "coal_ore");
-        let mut bot = Bot::new();
-        let player = standing(0.5, 64.0, 0.5);
-        bot.command("basso mine 1 coal_ore", &world, &player);
-        bot.tick(&world, &player, &[]);
-        world.air(BlockPos::new(2, 64, 0));
-        let stuck = [item(9, "coal", 0.5, 0.5)];
-        for _ in 0..=ITEM_PATIENCE {
-            assert!(bot.tick(&world, &player, &stuck).is_some());
-        }
-        assert_eq!(bot.tick(&world, &player, &stuck), None);
-        assert_eq!(bot.take_messages(), ["Mined 1 coal_ore."]);
-    }
 
     #[test]
     fn explores_when_nothing_is_loaded_nearby() {
@@ -1469,11 +1791,13 @@ mod tests {
         assert!(bot.is_active());
         // a block shows up: it goes for it at the next search
         world.set(BlockPos::new(5, 64, 0), Cell::solid(1.0), "gold_block");
-        for _ in 0..EXPLORE_SCAN_TICKS {
+        for _ in 0..EXPLORE_SCAN_TICKS + 2 {
             bot.tick(&world, &player, &[]);
         }
-        assert_eq!(bot.target_block(), Some(BlockPos::new(5, 64, 0)));
-        assert_eq!(bot.goal(), Some(&Goal::TwoBlocks(BlockPos::new(5, 64, 0))));
+        let Some(Goal::Composite(goals)) = bot.goal() else {
+            panic!("{:?}", bot.goal());
+        };
+        assert_eq!(goals.len(), 1);
         assert!(bot.take_messages().is_empty());
     }
 
@@ -1486,6 +1810,116 @@ mod tests {
         // the first waypoint is reached: on to the second
         bot.tick(&world, &standing(64.5, 64.0, 0.5), &[]);
         assert_eq!(bot.goal(), Some(&Goal::XZ { x: 64, z: 64 }));
+    }
+
+    #[test]
+    fn a_sky_island_drops_to_the_ground_below_before_exploring() {
+        let mut world = TestWorld::default();
+        // a 5x5 island at 63, ground 30 blocks lower
+        for x in -12..=12 {
+            for z in -12..=12 {
+                world.set(BlockPos::new(x, 33, z), Cell::solid(30.0), "stone");
+                if x.abs() <= 2 && z.abs() <= 2 {
+                    world.set(BlockPos::new(x, 63, z), Cell::solid(30.0), "stone");
+                }
+            }
+        }
+        assert_eq!(descent_level(&world, BlockPos::new(0, 64, 0)), Some(34));
+        let mut bot = Bot::new();
+        let player = standing(0.5, 64.0, 0.5);
+        bot.command("basso mine gold_block", &world, &player);
+        bot.tick(&world, &player, &[]);
+        assert_eq!(bot.goal(), Some(&Goal::Y(34)));
+    }
+
+    #[test]
+    fn water_below_is_a_landing_and_lava_is_not() {
+        let mut world = TestWorld::default();
+        for x in -3..=3 {
+            for z in -3..=3 {
+                world.set(BlockPos::new(x, 40, z), Cell::WATER, "water");
+            }
+        }
+        assert_eq!(descent_level(&world, BlockPos::new(0, 64, 0)), Some(40));
+        let mut world = TestWorld::default();
+        for x in -3..=3 {
+            for z in -3..=3 {
+                world.set(BlockPos::new(x, 40, z), Cell::LAVA, "lava");
+            }
+        }
+        assert_eq!(descent_level(&world, BlockPos::new(0, 64, 0)), None);
+    }
+
+    #[test]
+    fn ground_close_below_is_not_worth_a_descent() {
+        let world = TestWorld::flat(30);
+        assert_eq!(descent_level(&world, BlockPos::new(0, 64, 0)), None);
+        assert_eq!(descent_level(&world, BlockPos::new(0, 70, 0)), None);
+    }
+
+    fn buried_ore_world() -> TestWorld {
+        let mut world = TestWorld::default();
+        for x in -20..=20 {
+            for z in -20..=20 {
+                for y in 40..=63 {
+                    world.stone(BlockPos::new(x, y, z));
+                }
+            }
+        }
+        world.set(BlockPos::new(5, 50, 3), Cell::solid(60.0), "diamond_ore");
+        world
+    }
+
+    #[test]
+    fn verbose_levels_say_more_and_normal_says_nothing_extra() {
+        let player = standing(0.5, 64.0, 0.5);
+        for (verbose, expect) in [(0u8, false), (1, true)] {
+            let world = buried_ore_world();
+            let mut bot = Bot::new();
+            bot.command(&format!("basso set verbose {verbose}"), &world, &player);
+            bot.command("basso mine diamond_ore", &world, &player);
+            bot.take_messages();
+            for _ in 0..30 {
+                bot.tick(&world, &player, &[]);
+            }
+            let said = bot.take_messages();
+            assert_eq!(said.iter().any(|m| m.starts_with("[v1] Search over")), expect, "{said:?}");
+        }
+    }
+
+    #[test]
+    fn a_buried_ore_gets_a_path_at_once() {
+        let world = buried_ore_world();
+        let player = standing(0.5, 64.0, 0.5);
+        let mut bot = Bot::new();
+        bot.command("basso set verbose 2", &world, &player);
+        bot.command("basso mine diamond_ore", &world, &player);
+        bot.take_messages();
+        let mut moved_at = None;
+        for tick in 0..60 {
+            let controls = bot.tick(&world, &player, &[]).unwrap_or_default();
+            if controls != Controls::default() && moved_at.is_none() {
+                moved_at = Some(tick);
+            }
+        }
+        let said = bot.take_messages().join("\n");
+        assert!(said.contains("Search over"), "{said}");
+        assert!(!said.contains("No path"), "{said}");
+        assert!(moved_at.is_some_and(|t| t < 30), "{moved_at:?}\n{said}");
+    }
+
+    #[test]
+    fn click_mode_toggles_and_a_click_sets_a_goto() {
+        let world = TestWorld::flat(10);
+        let player = standing(0.5, 64.0, 0.5);
+        let mut bot = Bot::new();
+        assert!(!bot.click_mode());
+        assert!(bot.command("basso click", &world, &player)[0].starts_with("Click on"));
+        assert!(bot.click_mode());
+        assert_eq!(bot.command("basso click", &world, &player), ["Click off."]);
+        assert!(!bot.click_mode());
+        let line = bot.click_goto(Goal::Block(BlockPos::new(3, 64, 3)));
+        assert_eq!(line, "Going to 3 64 3.");
     }
 
     #[test]
@@ -1628,4 +2062,118 @@ mod tests {
         // the floor under the feet
         assert!(can_reach(&world, &player, BlockPos::new(0, 63, 0)));
     }
+
+    /// A world with the floor cut out for x in `from..=to`, across all z.
+    fn with_gap(from: i32, to: i32) -> TestWorld {
+        let mut world = TestWorld::flat(15);
+        for x in from..=to {
+            for z in -15..=15 {
+                world.air(BlockPos::new(x, 63, z));
+            }
+        }
+        world
+    }
+
+    fn first_controls(bot: &mut Bot, world: &TestWorld, player: &PlayerState) -> Option<Controls> {
+        (0..40)
+            .filter_map(|_| bot.tick(world, player, &[]))
+            .find(|c| c.forward || c.jump || c.sneak)
+    }
+
+    #[test]
+    fn bridges_a_wide_gap_when_it_has_blocks() {
+        let world = with_gap(1, 8);
+        let mut bot = Bot::new();
+        let player = PlayerState { has_blocks: true, ..standing(0.5, 64.0, 0.5) };
+        bot.command("basso goto 10 64 0", &world, &player);
+        let controls = first_controls(&mut bot, &world, &player).expect("sets off");
+        assert!(controls.sneak, "{controls:?}");
+    }
+
+    fn dropping(y: f64) -> PlayerState {
+        PlayerState {
+            pos: Vec3::new(0.5, y, 0.5),
+            velocity: Vec3::new(0.0, -1.6, 0.0),
+            on_ground: false,
+            pitch: 90.0,
+            fall_distance: 12.0,
+            water_bucket: true,
+            ..PlayerState::default()
+        }
+    }
+
+    #[test]
+    fn a_long_fall_during_an_order_puts_water_down() {
+        let world = TestWorld::flat(10);
+        let mut bot = Bot::new();
+        bot.command("basso goto 5 64 5", &world, &standing(0.5, 90.0, 0.5));
+        let c = bot.tick(&world, &dropping(66.0), &[]).expect("takes the fall");
+        assert!(c.use_item && c.bucket == Some(crate::executor::Bucket::Water));
+        assert_eq!(c.look.unwrap().1, 90.0);
+    }
+
+    #[test]
+    fn the_clutch_can_be_switched_off_and_needs_an_order() {
+        let world = TestWorld::flat(10);
+        let mut bot = Bot::new();
+        bot.settings.mlg_water_bucket = false;
+        bot.command("basso goto 5 64 5", &world, &standing(0.5, 90.0, 0.5));
+        let c = bot.tick(&world, &dropping(66.0), &[]);
+        assert!(c.is_none_or(|c| c.bucket.is_none() && !c.use_item));
+        // no order, no clutch: a player falling by themselves keeps the controls
+        let mut idle = Bot::new();
+        assert_eq!(idle.tick(&world, &dropping(66.0), &[]), None);
+    }
+
+    #[test]
+    fn does_not_bridge_without_blocks_or_when_placing_is_off() {
+        let world = with_gap(1, 8);
+        for (has_blocks, allow_place) in [(false, true), (true, false)] {
+            let mut bot = Bot::new();
+            bot.settings.allow_place = allow_place;
+            let player = PlayerState { has_blocks, ..standing(0.5, 64.0, 0.5) };
+            bot.command("basso goto 10 64 0", &world, &player);
+            let controls = first_controls(&mut bot, &world, &player);
+            assert!(controls.is_none_or(|c| !c.sneak), "{has_blocks} {allow_place}");
+        }
+    }
+
+    #[test]
+    fn jumps_a_small_gap_unless_parkour_is_off() {
+        let world = with_gap(1, 1);
+        let mut bot = Bot::new();
+        let player = standing(0.5, 64.0, 0.5);
+        bot.command("basso goto 4 64 0", &world, &player);
+        let controls = first_controls(&mut bot, &world, &player).expect("sets off");
+        assert!(controls.forward && controls.sprint);
+        assert!(bot.path_nodes().iter().any(|n| *n == BlockPos::new(2, 64, 0)));
+
+        let mut bot = Bot::new();
+        bot.settings.allow_parkour = false;
+        bot.command("basso goto 4 64 0", &world, &player);
+        let walked = first_controls(&mut bot, &world, &player);
+        // no way over: a path to somewhere short of the gap, or none
+        assert!(bot.path_nodes().iter().all(|n| n.x <= 0), "{:?}", bot.path_nodes());
+        let _ = walked;
+    }
+
+    #[test]
+    fn breaking_can_be_switched_off() {
+        let mut world = TestWorld::flat(15);
+        for y in 64..67 {
+            for z in -8..=8 {
+                world.stone(BlockPos::new(3, y, z));
+            }
+        }
+        let mut bot = Bot::new();
+        bot.settings.allow_break = false;
+        let player = standing(0.5, 64.0, 0.5);
+        bot.command("basso goto 6 64 0", &world, &player);
+        for _ in 0..40 {
+            if let Some(c) = bot.tick(&world, &player, &[]) {
+                assert_eq!(c.mine, None);
+            }
+        }
+    }
 }
+

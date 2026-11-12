@@ -20,6 +20,11 @@ pub struct Cell {
     pub liquid: bool,
     /// Sand, gravel and the like, which fall when the block below goes.
     pub falling: bool,
+    /// Ladders and vines: a player in it can climb up and down.
+    pub climbable: bool,
+    /// A thin floor in the block itself (a closed trapdoor): feet stand in
+    /// it on top of nothing else.
+    pub thin_floor: bool,
     /// Ticks to break it with what the player holds, `f32::INFINITY` when it
     /// can't be broken (bedrock, lava, fluids).
     pub break_ticks: f32,
@@ -33,6 +38,8 @@ impl Cell {
         water: false,
         liquid: false,
         falling: false,
+        climbable: false,
+        thin_floor: false,
         break_ticks: 0.0,
     };
 
@@ -45,6 +52,8 @@ impl Cell {
             water: false,
             liquid: false,
             falling: false,
+            climbable: false,
+            thin_floor: false,
             break_ticks,
         }
     }
@@ -56,6 +65,8 @@ impl Cell {
         water: true,
         liquid: true,
         falling: false,
+        climbable: false,
+        thin_floor: false,
         break_ticks: f32::INFINITY,
     };
 
@@ -66,6 +77,8 @@ impl Cell {
         water: false,
         liquid: true,
         falling: false,
+        climbable: false,
+        thin_floor: false,
         break_ticks: f32::INFINITY,
     };
 
@@ -77,6 +90,8 @@ impl Cell {
         water: false,
         liquid: false,
         falling: false,
+        climbable: false,
+        thin_floor: false,
         break_ticks: f32::INFINITY,
     };
 }
@@ -104,6 +119,10 @@ pub struct CachedWorld<'a> {
     break_costs: RefCell<HashMap<BlockPos, f32>>,
     /// Whether moves may break blocks.
     pub allow_mining: bool,
+    /// Whether moves may jump over gaps.
+    pub allow_parkour: bool,
+    /// Whether moves may place blocks (the player has some to place).
+    pub allow_place: bool,
 }
 
 impl<'a> CachedWorld<'a> {
@@ -113,7 +132,16 @@ impl<'a> CachedWorld<'a> {
             cells: RefCell::default(),
             break_costs: RefCell::default(),
             allow_mining,
+            allow_parkour: true,
+            allow_place: false,
         }
+    }
+
+    /// The same world with parkour and placing switched.
+    pub fn with_moves(mut self, parkour: bool, place: bool) -> Self {
+        self.allow_parkour = parkour;
+        self.allow_place = place;
+        self
     }
 
     fn lookup(&self, pos: BlockPos) -> Option<Cell> {
@@ -142,6 +170,17 @@ impl<'a> CachedWorld<'a> {
         self.cell(pos).water
     }
 
+    pub fn is_block_climbable(&self, pos: BlockPos) -> bool {
+        self.cell(pos).climbable
+    }
+
+    /// Feet at `pos` rest on something in `pos` itself: a ladder to hold or a
+    /// thin floor to stand on.
+    fn is_held_up(&self, pos: BlockPos) -> bool {
+        let cell = self.cell(pos);
+        cell.climbable || cell.thin_floor
+    }
+
     pub fn is_block_solid(&self, pos: BlockPos) -> bool {
         self.cell(pos).solid
     }
@@ -157,7 +196,7 @@ impl<'a> CachedWorld<'a> {
 
     /// A player could stand with their feet in `pos`.
     pub fn is_standable(&self, pos: BlockPos) -> bool {
-        self.is_block_standable(pos.down(1)) && self.is_passable(pos)
+        (self.is_block_standable(pos.down(1)) || self.is_held_up(pos)) && self.is_passable(pos)
     }
 
     /// The cost of breaking the block so a player fits through, 0 when it's
@@ -210,7 +249,7 @@ impl<'a> CachedWorld<'a> {
 
     /// The cost of clearing `pos` to stand in, infinite without a floor.
     pub fn cost_for_standing(&self, pos: BlockPos) -> f32 {
-        if !self.is_block_standable(pos.down(1)) {
+        if !self.is_block_standable(pos.down(1)) && !self.is_held_up(pos) {
             return f32::INFINITY;
         }
         self.cost_for_passing(pos)

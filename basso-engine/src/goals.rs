@@ -27,6 +27,9 @@ pub enum Goal {
     /// Baritone's `GoalGetToBlock`: next to the block or standing on it, to
     /// reach it without breaking it.
     GetToBlock(BlockPos),
+    /// Baritone's `MineProcess.GoalThreeBlocks`: the feet in this block or
+    /// one of the two below it.
+    ThreeBlocks(BlockPos),
     /// Baritone's `GoalComposite`: any one of these, whichever is nearest.
     Composite(Vec<Goal>),
 }
@@ -59,6 +62,16 @@ impl Goal {
                 xz_heuristic((p.x - n.x) as f32, (p.z - n.z) as f32)
                     + y_heuristic((p.y - n.y) as f32)
             }
+            Goal::ThreeBlocks(p) => {
+                // Baritone's y difference is the node's minus the goal's
+                let below = n.y - p.y;
+                let below = match below {
+                    d if d < -1 => d + 2,
+                    -1 => 0,
+                    d => d,
+                };
+                xz_heuristic((p.x - n.x) as f32, (p.z - n.z) as f32) + y_heuristic(-below as f32)
+            }
         }
     }
 
@@ -73,6 +86,7 @@ impl Goal {
                 center.distance_squared(pos) <= f64::from(radius * radius)
             }
             Goal::TwoBlocks(p) => n == p || n == p.down(1),
+            Goal::ThreeBlocks(p) => n == p || n == p.down(1) || n == p.down(2),
             Goal::GetToBlock(p) => {
                 let (dx, mut dy, dz) = (n.x - p.x, n.y - p.y, n.z - p.z);
                 if dy < 0 {
@@ -93,7 +107,7 @@ impl std::fmt::Display for Goal {
             Goal::Radius { pos, radius } => {
                 write!(f, "within {radius} of {:.1} {:.1} {:.1}", pos.x, pos.y, pos.z)
             }
-            Goal::TwoBlocks(p) | Goal::GetToBlock(p) => write!(f, "the block at {p}"),
+            Goal::TwoBlocks(p) | Goal::ThreeBlocks(p) | Goal::GetToBlock(p) => write!(f, "the block at {p}"),
             Goal::Composite(goals) => write!(f, "one of {} goals", goals.len()),
         }
     }
@@ -122,6 +136,26 @@ fn y_heuristic(dy: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn three_blocks_goal_takes_the_feet_in_it_or_two_below() {
+        let goal = Goal::ThreeBlocks(BlockPos::new(0, 10, 0));
+        for y in 8..=10 {
+            assert!(goal.success(BlockPos::new(0, y, 0)), "{y}");
+            assert_eq!(goal.heuristic(BlockPos::new(0, y, 0)), 0.0, "{y}");
+        }
+        assert!(!goal.success(BlockPos::new(0, 7, 0)));
+        assert!(!goal.success(BlockPos::new(0, 11, 0)));
+        // from below it is as far as from below the lowest of the three
+        assert_eq!(
+            goal.heuristic(BlockPos::new(0, 5, 0)),
+            Goal::Block(BlockPos::new(0, 8, 0)).heuristic(BlockPos::new(0, 5, 0))
+        );
+        assert_eq!(
+            goal.heuristic(BlockPos::new(0, 13, 0)),
+            Goal::Block(BlockPos::new(0, 10, 0)).heuristic(BlockPos::new(0, 13, 0))
+        );
+    }
 
     #[test]
     fn composite_goal_is_the_nearest_of_its_goals() {

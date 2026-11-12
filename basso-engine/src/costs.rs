@@ -9,6 +9,13 @@ pub const SPRINT_MULTIPLIER: f32 = SPRINT_ONE_BLOCK_COST / WALK_ONE_BLOCK_COST; 
 pub const JUMP_PENALTY: f32 = 2.;
 pub const ENTER_WATER_PENALTY: f32 = 3.;
 pub const CENTER_AFTER_FALL_COST: f32 = WALK_ONE_BLOCK_COST - WALK_OFF_BLOCK_COST; // 0.927
+/// Sneaking along an edge while bridging.
+pub const SNEAK_ONE_BLOCK_COST: f32 = 20. / 1.3; // 15.38
+/// Baritone's `placeBlockCost`.
+pub const PLACE_BLOCK_COST: f32 = 20.;
+/// Climbing a ladder or vine up (0.2 blocks a tick) and sliding down (0.15).
+pub const LADDER_UP_ONE_COST: f32 = 20. / 4.;
+pub const LADDER_DOWN_ONE_COST: f32 = 20. / 3.;
 pub const WALK_ONE_IN_WATER_COST: f32 = 20. / 1.960; // 10.204
 
 /// Baritone's multiplier to turn x/z distance into ticks for the heuristic.

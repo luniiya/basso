@@ -482,4 +482,77 @@ mod tests {
         assert_eq!(search.start(), start);
         assert_eq!(search.goal(), &Goal::Block(BlockPos::new(25, 64, 0)));
     }
+
+    #[test]
+    fn climbs_a_ladder_to_a_goal_high_up() {
+        let mut world = TestWorld::flat(10);
+        let ladder = crate::world::Cell {
+            climbable: true,
+            ..crate::world::Cell::AIR
+        };
+        for y in 64..72 {
+            world.stone(BlockPos::new(2, y, 0));
+            world.set(BlockPos::new(1, y, 0), ladder, "ladder");
+        }
+        let start = BlockPos::new(0, 64, 0);
+        let goal = BlockPos::new(2, 72, 0);
+        let path = search(&world, start, Goal::Block(goal), false);
+        assert!(!path.is_partial, "{path:?}");
+        assert_connected(start, &path);
+        assert!(path.steps.iter().filter(|s| s.kind == MoveKind::Climb).count() >= 6);
+        assert_eq!(path.steps.last().unwrap().target, goal);
+    }
+
+    fn fence_wall() -> TestWorld {
+        let mut world = TestWorld::flat(10);
+        let fence = crate::blocks::classify(&crate::blocks::BlockTraits {
+            name: "minecraft:oak_fence",
+            ..Default::default()
+        });
+        for z in -3..=3 {
+            world.set(BlockPos::new(2, 64, z), fence, "oak_fence");
+        }
+        world
+    }
+
+    #[test]
+    fn walks_around_a_fence_wall() {
+        let world = fence_wall();
+        let start = BlockPos::new(0, 64, 0);
+        let goal = BlockPos::new(4, 64, 0);
+        let path = search(&world, start, Goal::Block(goal), false);
+        assert!(!path.is_partial, "{path:?}");
+        assert_connected(start, &path);
+        assert!(path.steps.iter().all(|s| !(s.target.x == 2 && (-3..=3).contains(&s.target.z) && s.target.y <= 65)));
+        assert_eq!(path.steps.last().unwrap().target, goal);
+    }
+
+    #[test]
+    fn never_stands_on_top_of_a_fence_even_when_it_may_break_blocks() {
+        let world = fence_wall();
+        let start = BlockPos::new(0, 64, 0);
+        let goal = BlockPos::new(4, 64, 0);
+        let path = search(&world, start, Goal::Block(goal), true);
+        assert_connected(start, &path);
+        assert!(path.steps.iter().all(|s| !(s.target.x == 2 && (-3..=3).contains(&s.target.z) && s.target.y == 65)));
+    }
+
+    #[test]
+    fn walks_across_a_floor_of_trapdoors_over_the_void() {
+        let mut world = TestWorld::default();
+        let trapdoor = crate::world::Cell {
+            thin_floor: true,
+            ..crate::world::Cell::AIR
+        };
+        world.stone(BlockPos::new(0, 63, 0));
+        for x in 1..=6 {
+            world.set(BlockPos::new(x, 64, 0), trapdoor, "oak_trapdoor");
+        }
+        let start = BlockPos::new(0, 64, 0);
+        let goal = BlockPos::new(6, 64, 0);
+        let path = search(&world, start, Goal::Block(goal), false);
+        assert!(!path.is_partial, "{path:?}");
+        assert_connected(start, &path);
+        assert_eq!(path.steps.last().unwrap().target, goal);
+    }
 }

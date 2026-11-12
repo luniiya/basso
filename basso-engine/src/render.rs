@@ -20,6 +20,10 @@ pub const BEST_SO_FAR_COLOR: u32 = 0x6600_00FF;
 pub const RECENT_COLOR: u32 = 0x6600_FFFF;
 /// Baritone's `pathRenderLineWidthPixels`.
 pub const PATH_WIDTH: f32 = 5.0;
+/// How far a column goal reaches below and above the player.
+pub const XZ_BEAM_BELOW: f64 = 1.0;
+pub const XZ_BEAM_ABOVE: f64 = 5.0;
+
 /// Baritone's `goalRenderLineWidthPixels`.
 pub const GOAL_WIDTH: f32 = 3.0;
 /// Baritone's `yLevelBoxSize`.
@@ -183,7 +187,7 @@ fn goal_box(goal: &Goal, scene: &Scene, out: &mut Vec<Line>) {
             let mid = f64::from(p.y) + 1.0;
             (x0, z0, x1, z1, f64::from(p.y), f64::from(p.y) + 2.0, Some((mid + y, mid - y)))
         }
-        Goal::TwoBlocks(p) | Goal::GetToBlock(p) => {
+        Goal::TwoBlocks(p) | Goal::ThreeBlocks(p) | Goal::GetToBlock(p) => {
             let (x0, z0, x1, z1) = column(p.x, p.z);
             let mid = f64::from(p.y) + 0.5;
             let y = y / 2.0;
@@ -197,7 +201,10 @@ fn goal_box(goal: &Goal, scene: &Scene, out: &mut Vec<Line>) {
         }
         Goal::XZ { x, z } => {
             let (x0, z0, x1, z1) = column(x, z);
-            (x0, z0, x1, z1, f64::from(scene.min_y), f64::from(scene.max_y), None)
+            // a column the height of the world is ugly: keep it near the player
+            let lo = (scene.player.y - XZ_BEAM_BELOW).max(f64::from(scene.min_y));
+            let hi = (scene.player.y + XZ_BEAM_ABOVE).min(f64::from(scene.max_y));
+            (x0, z0, x1, z1, lo, hi, None)
         }
         Goal::Composite(_) => unreachable!("drawn above"),
         Goal::Y(level) => {
@@ -324,11 +331,21 @@ mod tests {
     }
 
     #[test]
-    fn column_goal_spans_the_world() {
+    fn column_goal_stays_near_the_player() {
         let goal = Goal::XZ { x: 5, z: 5 };
         let lines = lines(&scene(&[], &[], Some(&goal)));
         assert_eq!(lines.len(), 4);
-        assert!(lines.iter().all(|l| l.from.y == -64.0 && l.to.y == 320.0));
+        assert!(lines.iter().all(|l| l.from.y == 64.0 - XZ_BEAM_BELOW && l.to.y == 64.0 + XZ_BEAM_ABOVE));
+    }
+
+    #[test]
+    fn column_goal_is_cut_at_the_world_limits() {
+        let goal = Goal::XZ { x: 5, z: 5 };
+        let mut s = scene(&[], &[], Some(&goal));
+        s.player = Vec3::new(0.5, -64.0, 0.5);
+        s.max_y = -62;
+        let lines = lines(&s);
+        assert!(lines.iter().all(|l| l.from.y == -64.0 && l.to.y == -62.0));
     }
 
     #[test]

@@ -4,12 +4,14 @@
 
 pub mod astar;
 pub mod blocks;
+pub mod click;
 pub mod bot;
 pub mod commands;
 pub mod completion;
 pub mod costs;
 pub mod executor;
 pub mod goals;
+pub mod mlg;
 pub mod moves;
 pub mod pos;
 pub mod render;

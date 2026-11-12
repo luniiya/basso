@@ -12,9 +12,9 @@ use basso_engine::{
     bot::{Bot, EntityInfo},
     camera::{FlyKeys, FreeCam},
     completion::{self, Arg},
-    executor::{Controls, PlayerState},
+    executor::{Bucket, Controls, PlayerState, sprint_forward},
     pos::{BlockPos, Vec3},
-    render,
+    click, render,
     tools::{self, SlotSpeed},
     world::{BlockView, Cell},
 };
@@ -39,6 +39,14 @@ struct State {
     keys: FlyKeys,
     /// The view the player had before the free camera took over.
     camera_before: Option<CameraType>,
+    /// The player's view bobbing setting while the free camera is on.
+    bobbing_before: Option<bool>,
+    /// A click the mouse hook took, for the next tick to act on.
+    pending_click: Option<click::Button>,
+    /// basso was driving last tick, to catch the moment it takes over.
+    was_driving: bool,
+    /// Ticks the sprint has been wanted, for the double tap that starts it.
+    sprint_ticks: u32,
 }
 
 impl State {
@@ -49,6 +57,10 @@ impl State {
             cam: None,
             keys: FlyKeys::default(),
             camera_before: None,
+            bobbing_before: None,
+            pending_click: None,
+            was_driving: false,
+            sprint_ticks: 0,
         }
     }
 
@@ -90,6 +102,7 @@ impl BlockView for View<'_, '_> {
             waterlogged: f.waterlogged,
             hardness: f.hardness,
             requires_tool: f.requires_tool,
+            floor_top: floor_top(&f.outline),
         }))
     }
 
@@ -120,7 +133,55 @@ fn vec3(v: horizon_core::geometry::Vec3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
 
-fn player_state(game: &Game<'_>) -> Option<PlayerState> {
+// Baritone's `colorBlockPathNodes`-style cyan for the block under the pointer.
+const CLICK_COLOR: u32 = 0xFF00_FFFF;
+
+// Baritone's acceptableThrowawayItems: blocks that are no loss to build with.
+const THROWAWAY: &[&str] = &[
+    "minecraft:cobblestone",
+    "minecraft:stone",
+    "minecraft:dirt",
+    "minecraft:netherrack",
+    "minecraft:cobbled_deepslate",
+    "minecraft:deepslate",
+    "minecraft:andesite",
+    "minecraft:diorite",
+    "minecraft:granite",
+    "minecraft:tuff",
+];
+
+// The hotbar slot holding a block to build with: a throwaway block when
+// there is one, else any other plain block (glowstone, planks) that is no
+// loss to place.
+fn block_slot(game: &Game<'_>) -> Option<usize> {
+    let stack = |i: usize| game.inventory.get(i).and_then(Option::as_ref).filter(|s| s.count > 0);
+    (0..9)
+        .find(|&i| stack(i).is_some_and(|s| THROWAWAY.contains(&&*s.item)))
+        .or_else(|| {
+            let facts = game.res.facts();
+            (0..9).find(|&i| {
+                stack(i).is_some_and(|s| {
+                    facts
+                        .states
+                        .iter()
+                        .find(|b| basso_engine::block_id_matches(&s.item, &b.name))
+                        .is_some_and(|b| blocks::is_buildable(&b.name, b.full_collision))
+                })
+            })
+        })
+}
+
+// The hotbar slot holding `id`.
+fn item_slot(game: &Game<'_>, id: &str) -> Option<usize> {
+    (0..9).find(|&i| {
+        game.inventory
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_some_and(|stack| stack.count > 0 && &*stack.item == id)
+    })
+}
+
+fn player_state(game: &Game<'_>, sneaking: bool) -> Option<PlayerState> {
     let p = game.player.as_ref()?;
     Some(PlayerState {
         pos: vec3(p.position),
@@ -129,6 +190,13 @@ fn player_state(game: &Game<'_>) -> Option<PlayerState> {
         in_water: p.fluids.was_touching_water,
         eye_in_water: p.fluids.was_eye_in_water,
         air: p.air,
+        yaw: game.yaw,
+        pitch: game.pitch,
+        sneaking,
+        has_blocks: block_slot(game).is_some(),
+        fall_distance: p.fall_distance,
+        water_bucket: item_slot(game, "minecraft:water_bucket").is_some(),
+        empty_bucket: item_slot(game, "minecraft:bucket").is_some(),
     })
 }
 
@@ -201,7 +269,7 @@ pub(super) fn command(game: &mut Game<'_>, line: &str) -> bool {
     if !echo.is_empty() {
         chat_line(game, &format!("> {echo}"), ECHO_COLOR);
     }
-    let Some(player) = player_state(game) else {
+    let Some(player) = player_state(game, false) else {
         say(game, vec!["Not in a world.".to_owned()]);
         return true;
     };
@@ -224,7 +292,20 @@ pub(super) fn tick(game: &mut Game<'_>) {
     let Some(st) = guard.as_mut() else {
         return;
     };
-    let controls = match player_state(game) {
+    // clicks the player got past the mouse hook (a tap queued before basso
+    // took over) are not basso's: drop them before basso's own are queued
+    if st.driving() && game.screen == Screen::Playing {
+        game.attack_clicks = 0;
+        game.use_clicks = 0;
+    }
+    // a button the player still held when basso took over would stay down
+    // (its release is kept from the game): let go of both
+    if st.driving() && !st.was_driving {
+        let _ = game.mouse_mapping(MouseButton::Left, false, Source::Agent);
+        let _ = game.mouse_mapping(MouseButton::Right, false, Source::Agent);
+    }
+    st.was_driving = st.driving();
+    let controls = match player_state(game, st.held.sneak) {
         Some(player) => {
             let entities = entities(game);
             st.bot.tick(&View(game), &player, &entities)
@@ -232,9 +313,15 @@ pub(super) fn tick(game: &mut Game<'_>) {
         // the player is gone (dead, between worlds): keep the order
         None => None,
     };
-    let messages = st.bot.take_messages();
+    let mut messages = st.bot.take_messages();
+    if let Some(button) = st.pending_click.take()
+        && let Some(block) = pointed_block(game, st.cam.as_ref())
+    {
+        messages.push(st.bot.click_goto(click::goal(button, block)));
+    }
     let controls = controls.unwrap_or_default();
     apply(game, &st.held, &controls);
+    hand_with_screen_open(game, &st.held, &controls);
     if st.bot.settings.auto_tool
         && let Some(target) = controls.mine
     {
@@ -244,6 +331,15 @@ pub(super) fn tick(game: &mut Game<'_>) {
     watch_camera(game, st);
     drop(guard);
     say(game, messages);
+}
+
+// The top of the highest box that covers most of a block's floor.
+fn floor_top(outline: &[[f64; 6]]) -> f32 {
+    outline
+        .iter()
+        .filter(|b| (b[3] - b[0]) * (b[5] - b[2]) >= 0.75)
+        .map(|b| b[4] as f32)
+        .fold(0.0, f32::max)
 }
 
 fn key(game: &mut Game<'_>, key: KeyCode, was: bool, now: bool) {
@@ -262,10 +358,41 @@ fn apply(game: &mut Game<'_>, was: &Controls, now: &Controls) {
         game.pitch = pitch.clamp(-90.0, 90.0);
     }
     key(game, KeyCode::ControlLeft, was.sprint, now.sprint);
+    // right click: the block in hand goes on the face looked at
+    let (placing, place) = (was.place.is_some(), now.place.is_some());
+    if place && let Some(slot) = block_slot(game) {
+        game.selected = slot;
+    }
+    // a bucket is used the same way: held, then right click
+    if let Some(bucket) = now.bucket {
+        let id = match bucket {
+            Bucket::Water => "minecraft:water_bucket",
+            Bucket::Empty => "minecraft:bucket",
+        };
+        if let Some(slot) = item_slot(game, id) {
+            game.selected = slot;
+        }
+    }
+    if (placing || was.use_item) != (place || now.use_item) {
+        let _ = game.mouse_mapping(MouseButton::Right, place || now.use_item, Source::Agent);
+    }
     let (mining, mine) = (was.mine.is_some(), now.mine.is_some());
     if mining != mine {
         let _ = game.mouse_mapping(MouseButton::Left, mine, Source::Agent);
     }
+}
+
+// The game breaks and places only while no screen is open (`tick_local_hand`
+// checks for `Screen::Playing`), so with the inventory or chat up basso's
+// clicks would sit unused. Run that step here with the screen looked past.
+fn hand_with_screen_open(game: &mut Game<'_>, was: &Controls, now: &Controls) {
+    let clicking = |c: &Controls| c.mine.is_some() || c.place.is_some() || c.use_item;
+    if game.screen == Screen::Playing || !(clicking(was) || clicking(now)) {
+        return;
+    }
+    let screen = std::mem::replace(&mut game.screen, Screen::Playing);
+    let _ = game.tick_local_hand();
+    game.screen = screen;
 }
 
 // Baritone's autoTool: the hotbar slot that breaks `target` fastest.
@@ -301,6 +428,9 @@ fn watch_camera(game: &mut Game<'_>, st: &mut State) {
             st.camera_before = Some(game.camera_type);
             // third person, so the player's body is drawn
             game.camera_type = CameraType::ThirdPersonBack;
+            // no walking sway or hurt tilt on a camera outside the body
+            st.bobbing_before = Some(game.settings.view_bobbing);
+            game.settings.view_bobbing = false;
         }
         (true, Some(cam)) => cam.fly(st.keys),
         (false, Some(_)) => {
@@ -308,8 +438,20 @@ fn watch_camera(game: &mut Game<'_>, st: &mut State) {
             if let Some(before) = st.camera_before.take() {
                 game.camera_type = before;
             }
+            if let Some(before) = st.bobbing_before.take() {
+                game.settings.view_bobbing = before;
+            }
         }
         (false, None) => {}
+    }
+}
+
+// Sprinting and speed effects do not widen the view of a camera outside the
+// body.
+pub(super) fn fov_modifier(modifier: &mut f32) {
+    let guard = state();
+    if guard.as_ref().is_some_and(|st| st.cam.is_some()) {
+        *modifier = 1.0;
     }
 }
 
@@ -341,28 +483,83 @@ pub(super) fn movement_input(
     jump: &mut bool,
     sneak: &mut bool,
 ) {
-    let _ = game;
     let mut guard = state();
     let Some(st) = guard.as_mut().filter(|st| st.driving()) else {
         return;
     };
+    let sprinting = game.player.as_ref().is_some_and(|p| p.sprinting);
     st.keys = FlyKeys {
         forward: *forward,
         strafe: *strafe,
         up: *jump,
         down: *sneak,
     };
-    *forward = if st.held.forward { 1.0 } else { 0.0 };
+    // the sprint key does not start a sprint when sprint toggles, so tap
+    // forward twice, as a player does
+    let tap = if st.held.sprint && st.held.forward && !sprinting {
+        let tick = st.sprint_ticks;
+        st.sprint_ticks = tick.saturating_add(1);
+        sprint_forward(tick)
+    } else {
+        st.sprint_ticks = 0;
+        true
+    };
+    *forward = if st.held.forward && tap { 1.0 } else { 0.0 };
     *strafe = 0.0;
     *jump = st.held.jump;
-    *sneak = false;
+    *sneak = st.held.sneak;
 }
 
 // Clicks in the world are kept from the player while basso plays; menus
-// and chat still take them.
-pub(super) fn mouse_button(game: &Game<'_>, canceled: &mut bool) {
-    if game.screen == Screen::Playing && state().as_ref().is_some_and(State::driving) {
+// and chat still take them. In click mode the left and right buttons are
+// basso's: they pick a block and send basso there.
+pub(super) fn mouse_button(game: &Game<'_>, button: i32, pressed: bool, canceled: &mut bool) {
+    if game.screen != Screen::Playing {
+        return;
+    }
+    let mut guard = state();
+    let Some(st) = guard.as_mut() else {
+        return;
+    };
+    if st.bot.click_mode() && (button == 0 || button == 1) {
+        if pressed {
+            st.pending_click = Some(if button == 0 { click::Button::Left } else { click::Button::Right });
+        }
         *canceled = true;
+    } else if st.driving() {
+        *canceled = true;
+    }
+}
+
+// Where the view looks from and along: the free camera, else the player's eyes.
+fn aim(game: &Game<'_>, cam: Option<&FreeCam>) -> Option<(Vec3, Vec3)> {
+    if let Some(cam) = cam {
+        return Some((cam.at(1.0), click::look_dir(cam.yaw, cam.pitch)));
+    }
+    let p = game.player.as_ref()?;
+    let eye = vec3(p.position);
+    let origin = Vec3::new(eye.x, eye.y + f64::from(game.eye), eye.z);
+    Some((origin, click::look_dir(game.yaw, game.pitch)))
+}
+
+// The block a click would land on now.
+fn pointed_block(game: &Game<'_>, cam: Option<&FreeCam>) -> Option<BlockPos> {
+    let (origin, dir) = aim(game, cam)?;
+    click::pick_block(&View(game), origin, dir, click::REACH)
+}
+
+// The outline of the block under the pointer, as Baritone's click screen draws.
+fn click_box(block: BlockPos, primitives: &mut WorldPrimitives) {
+    let (x, y, z) = (f64::from(block.x), f64::from(block.y), f64::from(block.z));
+    let e = 0.002;
+    let (lo, hi) = ([x - e, y - e, z - e], [x + 1.0 + e, y + 1.0 + e, z + 1.0 + e]);
+    let corner = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    for a in 0..8usize {
+        for bit in [1usize, 2, 4] {
+            if a & bit == 0 {
+                primitives.line(corner(a), corner(a | bit), CLICK_COLOR, 2.0).through_walls = true;
+            }
+        }
     }
 }
 
@@ -400,10 +597,15 @@ fn seconds() -> f64 {
 // the goal, all seen through walls.
 pub(super) fn world_primitives(game: &Game<'_>, primitives: &mut WorldPrimitives) {
     let guard = state();
+    if let Some(st) = guard.as_ref().filter(|st| st.bot.click_mode())
+        && let Some(block) = pointed_block(game, st.cam.as_ref())
+    {
+        click_box(block, primitives);
+    }
     let Some(st) = guard.as_ref().filter(|st| st.bot.is_active()) else {
         return;
     };
-    let Some(player) = player_state(game) else {
+    let Some(player) = player_state(game, false) else {
         return;
     };
     let view = View(game);
@@ -473,4 +675,14 @@ fn arg_type(arg: Arg) -> (ArgType, Option<Suggests>) {
         Arg::Bool => (ArgType::Bool, None),
         Arg::Literal(_) => unreachable!("literals are added as literals"),
     }
+}
+
+// The row in Options > Mods; the commands are typed in chat, so no keys.
+pub(super) fn list(mods: &mut Vec<super::native_hooks::NativeMod>) {
+    mods.push(super::native_hooks::NativeMod {
+        id: "basso".into(),
+        title: concat!("basso ", env!("CARGO_PKG_VERSION")).into(),
+        description: "A pathfinder after Baritone: /basso goto, mine and follow.".into(),
+        keys: Vec::new(),
+    });
 }
