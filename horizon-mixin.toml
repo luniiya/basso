@@ -2,7 +2,7 @@
 # horizon-launcher native-build <this folder> --trust-native-code
 [mod]
 id = "basso"
-version = "0.1.0"
+version = "0.1.1"
 
 [compatibility]
 horizon_revision = "fdc87aecdbd116bf1e08adcd062fcbaea8c2e2ca"
@@ -142,9 +142,11 @@ bindings = [
 ]
 
 # Not a hook point: the chat box's command tree, built once per connection.
+# `with_native_commands` adds the native mods' command names to that tree; only `chat_tree_for` calls it.
+# (`chat_tree_for` itself can't take a RETURN injection on newer Horizon: its tail borrows a call.)
 [[injection]]
 id = "chat_tree"
-target = "horizon_client::game::chat::Game<'_>::chat_tree_for"
+target = "horizon_client::game::chat::with_native_commands"
 kind = "RETURN"
 helper = "mixins/basso/chat_tree.rs"
 bindings = [

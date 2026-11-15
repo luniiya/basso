@@ -116,6 +116,8 @@ Contributions are welcome: bug reports, ideas, and pull requests big or small.
   mining, following, commands and settings.
 - `scripts/ingame/`: in-game test scenarios.
 - `scripts/package.py`: builds `target/basso-<version>.hnmod` for a release.
+- `scripts/apply-check.sh`: whether the bundle applies on another Horizon commit, as the registry's Nightly check
+  applies it.
 - `assets/branding/`: the icon and the wordmark; `make-icon.sh` and `make_wordmark.py` redraw them.
 - `assets/previews/`: the GIFs in this README.
 
