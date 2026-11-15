@@ -426,11 +426,14 @@ fn hand_with_screen_open(game: &mut Game<'_>, was: &Controls, now: &Controls) {
     if game.screen == Screen::Playing || !(clicking(was) || clicking(now)) {
         return;
     }
+    // with a screen up the right press goes to the screen, not `use_clicks`
+    let pressed = |c: &Controls| c.place.is_some() || c.use_item;
+    if pressed(now) && !pressed(was) && game.using.is_none() {
+        game.use_clicks += 1;
+    }
     let screen = std::mem::replace(&mut game.screen, Screen::Playing);
-    let (uc, ac, held) = (game.use_clicks, game.attack_clicks, game.selected);
-    let r = game.tick_local_hand();
+    let _ = game.tick_local_hand();
     game.screen = screen;
-    chat_line(game, &format!("dbg hand: use_clicks {uc} attack {ac} slot {held} using {} ok {}", game.using.is_some(), r.is_ok()), TEXT_COLOR);
 }
 
 // Baritone's autoTool: the hotbar slot that breaks `target` fastest.
